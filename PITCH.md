@@ -20,10 +20,13 @@ Press Enter.
 - Fill the bucket at the shrinking pond and water a sprout. "If it dries out, it's gone, and it won't be a tree in fall."
 - Fall: the sprout turns into a tree. Show the fruit falling and the wind pushing you and rolling fruit away. "Your basket holds six. Whatever you leave on the ground rots when winter comes."
 
+- Summer, once you've shown the heat: walk up to the stray dog and press Space to adopt it. "It costs 4 wood for its house, and that's the same wood you need for the fire."
+
 ## 2:30 to 3:30, winter
 
 - Darkness, slow snow, fire light. Feed the fire.
 - Walk into the dark to grab glowing deadwood. A wolf howls. Run back to the light, where wolves won't follow.
+- If the dog has a house, let it bark a wolf away.
 - Chop a tree: "This is the choice the whole game is built on. Three logs now, or shade and fruit next year."
 - If there's time, stand on the ice at the end of winter so the cracks show, then step off.
 

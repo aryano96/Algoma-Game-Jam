@@ -34,6 +34,23 @@ Walk over seeds, fruit and wood to pick them up. Survive **3 winters** to win; a
 | **Fall** (wind) | Sprouts that survived become trees. Trees drop fruit, seeds and branches. Wind pushes you and blows loose fruit away. | Gather fruit (basket holds 6) and wood (arms hold 6). Collect seeds for next spring. Stock the fire. | Fruit left on the ground rots when winter comes. |
 | **Winter** (snow, night) | It's dark and you move slowly through snow. The fire burns fuel fast. Hunger is sharp. The pond freezes over (slippery). | Keep the hearth burning. Eat. Venture into the dark for deadwood, or chop one of your own trees. | Cold away from the fire light. Wolves in the dark. Standing on the ice when spring thaws drops you in. |
 
+### The stray dog
+
+A few seconds into summer, a stray dog wanders into the meadow. Walk up to it and press the act key to adopt it. A dashed outline then appears beside the cabin: drop **4 wood** there to build the dog a house. That wood is the same wood you need for the winter fire.
+
+Once adopted, the dog helps you in every season:
+
+- **Spring:** it chases rabbits away from your sprouts.
+- **Summer:** now and then it digs up a stick.
+- **Fall:** it fetches fruit from anywhere on the map, but only while your basket has room.
+- **Winter:** with a house, it walks with you into the dark and barks wolves away. Without a house, it shivers by the fire and can't help.
+
+The dog and the rabbits walk around the pond, never through it. A rabbit going after your sprouts shows a red **!!** bubble.
+
+If you don't adopt it by the end of summer, it leaves, and it comes back next summer. Press the act key beside your dog when there's nothing else to do, and you'll pet it.
+
+![The dog and its house](screenshots/dog.png)
+
 ### The one idea
 
 Every tree you plant is a choice that carries across the whole year and into the next:

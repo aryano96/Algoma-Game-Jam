@@ -36,6 +36,7 @@ const POND = { x: 178, y: 345, rx: 112, ry: 72 };
 const CABIN = { x0: 420, x1: 540, y0: 182, y1: 262 };
 const PORCH = { x0: 418, x1: 542, y0: 262, y1: 300 };
 const HEARTH = { x: 480, y: 336 };
+const KENNEL = { x: 594, y: 252, need: 4 }; // the dog house plot, east of the cabin
 const DIFF = {
   gentle: { season: 52, heat: 0.6, cold: 0.6, hunger: 0.65, wolves: 0.6, fruit: 1.35, burn: 0.75 },
   normal: { season: 42, heat: 1.0, cold: 1.0, hunger: 1.0, wolves: 1.0, fruit: 1.0, burn: 1.0 },
@@ -285,6 +286,9 @@ const SFX = {
   splash() { noise(0.5, 0.35, 'lowpass', 1800, 0.8, 0, 300); tone('sine', 400, 150, 0.3, 0.1); },
   out() { noise(0.6, 0.2, 'lowpass', 800, 0.7, 0, 100); },
   win() { [0, 4, 7, 12, 16, 19, 24].forEach((n, i) => tone('triangle', mtof(60 + n), 0, 0.5, 0.08, i * 0.12)); },
+  bark() { tone('square', 520, 260, 0.07, 0.07); noise(0.07, 0.18, 'bandpass', 900, 2); tone('square', 560, 280, 0.07, 0.06, 0.12); noise(0.07, 0.15, 'bandpass', 950, 2, 0.12); },
+  whine() { tone('sine', 900, 1300, 0.25, 0.05); tone('sine', 1300, 800, 0.3, 0.04, 0.25); },
+  build() { for (let i = 0; i < 3; i++) noise(0.05, 0.25, 'bandpass', 1800, 3, i * 0.11); tone('triangle', 330, 0, 0.12, 0.08, 0.35); },
   lose() { [12, 7, 3, 0].forEach((n, i) => tone('triangle', mtof(57 + n), 0, 0.7, 0.08, i * 0.25)); }
 };
 
@@ -380,6 +384,7 @@ function newGame(demo) {
     plots, items: [], rabbits: [], wolves: [], parts: [], floats: [], weather: [],
     fuel: 100, pond: 1, wind: { x: 0, y: 0, a: 0, s: 0, ta: 0, ts: 0, timer: 0 },
     spawn: { rabbit: 12, wolf: 7, wood: 4, twig: 10 }, stats: { fruit: 0, seeds: 0, planted: 0, rabbits: 0, wolves: 0, wood: 0, years: 0 },
+    dog: null, kennel: { wood: 0, built: false },
     banner: 0, shake: 0, flash: 0, cause: '', endless: false, lastTick: -1, crackT: 0, deadT: 0
   };
   if (!demo) {
@@ -406,6 +411,23 @@ const borderTrees = [];
   borderTrees.sort((a, b) => a.y - b.y);
 })();
 function inPondShape(x, y, k) { const a = (x - POND.x) / (POND.rx * k), b = (y - POND.y) / (POND.ry * k); return a * a + b * b < 1; }
+// animals treat the pond (and its muddy rim) as a wall and walk around it
+function pondR() { const k = Math.max(g.pond, 0.42); return { rx: POND.rx * k + 18, ry: POND.ry * k + 15 }; }
+function inPondRim(x, y) { const R = pondR(), a = (x - POND.x) / R.rx, b = (y - POND.y) / R.ry; return a * a + b * b < 1; }
+function pushOutOfPond(o) {
+  const R = pondR(), a = (o.x - POND.x) / R.rx, b = (o.y - POND.y) / R.ry, l = Math.hypot(a, b);
+  if (l < 1) { const n = l < 0.01 ? { a: 1, b: 0 } : { a: a / l, b: b / l }; o.x = POND.x + n.a * R.rx * 1.01; o.y = POND.y + n.b * R.ry * 1.01; }
+}
+function steerAroundPond(o, tx, ty) {
+  const R = pondR(), ang = (x, y) => Math.atan2((y - POND.y) / R.ry, (x - POND.x) / R.rx);
+  if (inPondRim(tx, ty)) { const a = ang(tx, ty); tx = POND.x + Math.cos(a) * (R.rx + 6); ty = POND.y + Math.sin(a) * (R.ry + 6); }
+  let hit = false;
+  for (let i = 1; i < 16 && !hit; i++) if (inPondRim(lerp(o.x, tx, i / 16), lerp(o.y, ty, i / 16))) hit = true;
+  if (!hit) return { x: tx, y: ty };
+  const a0 = ang(o.x, o.y), a1 = ang(tx, ty), dl = Math.atan2(Math.sin(a1 - a0), Math.cos(a1 - a0));
+  const a = a0 + Math.sign(dl || 1) * Math.min(Math.abs(dl), 0.6);
+  return { x: POND.x + Math.cos(a) * (R.rx + 12), y: POND.y + Math.sin(a) * (R.ry + 12) };
+}
 function inPond(x, y) { return inPondShape(x, y, g.pond); }
 function lightRadius() { return g.fuel > 0 ? 70 + 150 * Math.sqrt(g.fuel / 100) : 0; }
 function yearScale() { return 1 + 0.2 * (g.year - 1); }
@@ -432,6 +454,7 @@ function enterSeason(s) {
   if (s === 1) {
     g.plots.forEach(pl => { if (pl.state === 'sprout') pl.thirst = 1; });
     g.rabbits.forEach(r => r.state = 'flee');
+    g.dogT = rand(5, 9); // a stray turns up a few seconds into summer
   }
   if (s === 2) {
     let grown = 0;
@@ -440,6 +463,7 @@ function enterSeason(s) {
       if (pl.state === 'tree') { pl.fruitT = rand(1, 4); pl.branchT = rand(4, 12); pl.seedsLeft = pl.age >= 1 ? 2 : 1; pl.seedT = rand(4, g.len - 6); }
     });
     g.wind.timer = 0;
+    if (g.dog && g.dog.state === 'stray') { g.dog.state = 'leave'; if (!g.demo) SFX.whine(); } // nobody took it in
   }
   if (s === 3) {
     let rotted = 0;
@@ -457,7 +481,7 @@ function endOfYear() {
 function finish(won) {
   const s = g.stats, trees = g.plots.filter(p => p.state === 'tree').length;
   s.trees = trees;
-  s.score = Math.round(s.years * 100 + trees * 25 + s.fruit * 4 + s.planted * 10 + s.rabbits * 5 + s.wolves * 5 + Math.max(0, g.player.hp) * (won ? 1 : 0));
+  s.score = Math.round(s.years * 100 + trees * 25 + s.fruit * 4 + s.planted * 10 + s.rabbits * 5 + s.wolves * 5 + Math.max(0, g.player.hp) * (won ? 1 : 0) + (s.dog ? 40 : 0) + (s.kennel ? 60 : 0));
   s.best = s.score > best; if (s.best) { best = s.score; store('perennial.best', best); }
   setState(won ? 'win' : 'over');
   won ? SFX.win() : SFX.lose();
@@ -534,7 +558,7 @@ function update(dt) {
   if (s === 1) updateSummer(dt, d, ys);
   if (s === 2) updateFall(dt, d, ys);
   if (s === 3) updateWinter(dt, d, ys);
-  updateRabbits(dt); updateWolves(dt);
+  updateRabbits(dt); updateWolves(dt); updateDog(dt);
 
   // ---------------- items
   for (let i = g.items.length - 1; i >= 0; i--) {
@@ -584,8 +608,8 @@ function updateRabbits(dt) {
         g.plots.forEach(pl => { if (pl.state === 'sprout') { const dd = dist(r.x, r.y, pl.x, pl.y); if (dd < bestD) { bestD = dd; r.target = pl; } } });
         if (!r.target) { r.state = 'flee'; continue; }
       }
-      const tx = r.target.x - 12, ty = r.target.y + 4, dd = dist(r.x, r.y, tx, ty);
-      if (dd > 4) { const sp = 62 * (Math.sin(r.hop) > 0 ? 1.6 : 0.3); r.x += (tx - r.x) / dd * sp * dt; r.y += (ty - r.y) / dd * sp * dt; r.face = tx > r.x ? 1 : -1; }
+      const gx = r.target.x - 12, gy = r.target.y + 4, wp = steerAroundPond(r, gx, gy), tx = wp.x, ty = wp.y, dd = dist(r.x, r.y, tx, ty);
+      if (dist(r.x, r.y, gx, gy) > 4) { const sp = 62 * (Math.sin(r.hop) > 0 ? 1.6 : 0.3); r.x += (tx - r.x) / Math.max(1, dd) * sp * dt; r.y += (ty - r.y) / Math.max(1, dd) * sp * dt; r.face = tx > r.x ? 1 : -1; pushOutOfPond(r); }
       else { r.state = 'eat'; }
     } else if (r.state === 'eat') {
       if (!r.target || r.target.state !== 'sprout') { r.state = 'seek'; continue; }
@@ -595,7 +619,9 @@ function updateRabbits(dt) {
       const dd = Math.max(1, dist(r.x, r.y, p.x, p.y));
       let ax = (r.x - p.x) / dd, ay = (r.y - p.y) / dd;
       if (dd > 200) { ax = r.x < W / 2 ? -1 : 1; ay = 0; }
-      r.x += ax * 190 * dt; r.y += ay * 190 * dt; r.face = ax > 0 ? 1 : -1;
+      const wp = steerAroundPond(r, r.x + ax * 160, r.y + ay * 160), wd = Math.max(1, dist(r.x, r.y, wp.x, wp.y));
+      ax = (wp.x - r.x) / wd; ay = (wp.y - r.y) / wd;
+      r.x += ax * 190 * dt; r.y += ay * 190 * dt; r.face = ax > 0 ? 1 : -1; pushOutOfPond(r);
       if (r.x < -30 || r.x > W + 30 || r.y < -30 || r.y > H + 30) g.rabbits.splice(i, 1);
     }
   }
@@ -694,6 +720,72 @@ function updateWolves(dt) {
     w.x += vx * dt; w.y += vy * dt; if (Math.abs(vx) > 5) w.face = vx > 0 ? 1 : -1;
   }
 }
+// ---------------------------------------------------------------- the stray dog
+// Shows up in summer. Adopt it and it helps in every season: it chases rabbits in spring,
+// digs up sticks in summer, fetches fruit in fall and, if it has a house, guards you from wolves in winter.
+function updateDog(dt) {
+  const p = g.player, s = g.season;
+  if (!g.dog && s === 1 && !g.demo) {
+    g.dogT = (g.dogT === undefined ? 6 : g.dogT) - dt;
+    if (g.dogT <= 0 && g.len - g.t > 12) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      g.dog = { x: side < 0 ? -20 : W + 20, y: rand(380, 470), state: 'stray', face: -side, walk: 0, wag: 0, sit: false, tx: rand(300, 660), ty: rand(400, 470), carry: null, digT: rand(10, 14), dig: 0, barkT: 0, wanderT: 3 };
+      SFX.bark();
+    }
+  }
+  const d = g.dog; if (!d) return;
+  d.wag += dt * (d.state === 'friend' ? 14 : 6); d.barkT = Math.max(0, d.barkT - dt);
+  let tx = d.x, ty = d.y, sp = 0;
+  const pd = dist(d.x, d.y, p.x, p.y);
+  if (d.state === 'stray') {
+    // wanders the meadow, then sits and pants when you come close
+    d.wanderT -= dt;
+    if (d.wanderT <= 0) { d.wanderT = rand(3, 5); d.tx = clamp(d.x + rand(-140, 140), 120, 860); d.ty = clamp(d.y + rand(-80, 80), 120, 480); if (inPondRim(d.tx, d.ty)) d.tx = clamp(d.tx + 260, 120, 860); }
+    if (pd < 70) { d.face = p.x > d.x ? 1 : -1; d.sit = true; }
+    else { tx = d.tx; ty = d.ty; sp = 60; }
+  } else if (d.state === 'leave') {
+    tx = d.x < W / 2 ? -40 : W + 40; ty = d.y; sp = 110;
+    if (d.x < -30 || d.x > W + 30) { g.dog = null; g.dogT = undefined; return; }
+  } else {
+    const winterHome = s === 3 && !g.kennel.built;
+    const rab = s === 0 ? nearest(g.rabbits.filter(r => r.state !== 'flee' && dist(r.x, r.y, d.x, d.y) < 240), d.x, d.y) : null;
+    if (winterHome) { tx = HEARTH.x + 30; ty = HEARTH.y + 14; sp = 120; }
+    else if (d.dig > 0) { d.dig -= dt; if (d.dig <= 0) { const it = makeItem('wood', d.x + d.face * 10, d.y + 4, 14); it.vz = 70; g.items.push(it); SFX.bark(); } }
+    else if (rab) {
+      tx = rab.x; ty = rab.y; sp = 200;
+      if (dist(d.x, d.y, rab.x, rab.y) < 30) { rab.state = 'flee'; if (rab.target) rab.target.nibble = 0; g.stats.rabbits++; SFX.bark(); SFX.squeak(); floatText(rab.x, rab.y - 16, 'rabbit', '!'); }
+    } else if (s === 2 && !d.carry) {
+      const fr = p.fruit < CAP ? nearest(g.items.filter(i => i.type === 'fruit' && i.z < 3 && !inPondRim(i.x, i.y) && dist(i.x, i.y, p.x, p.y) > 30), d.x, d.y) : null;
+      if (fr) { tx = fr.x; ty = fr.y; sp = 170; if (dist(d.x, d.y, fr.x, fr.y) < 14) { g.items.splice(g.items.indexOf(fr), 1); d.carry = 'fruit'; } }
+      else { tx = p.x - p.face * 28; ty = p.y + 8; sp = pd > 50 ? 165 : pd > 30 ? 80 : 0; }
+    } else if (d.carry) {
+      tx = p.x; ty = p.y + 6; sp = 175;
+      if (pd < 26) {
+        if (p.fruit < CAP) { p.fruit++; g.stats.fruit++; SFX.pickup(); floatText(p.x, p.y - 30, 'fruit', '+1'); }
+        else g.items.push(makeItem('fruit', d.x, d.y + 4));
+        d.carry = null; d.wag = 0;
+      }
+    } else {
+      tx = p.x - p.face * 28; ty = p.y + 8; sp = pd > 50 ? (s === 3 ? 140 : 165) : pd > 30 ? 80 : 0;
+      // summer: now and then it digs up a stick
+      if (s === 1) { d.digT -= dt; if (d.digT <= 0 && pd < 90) { d.digT = rand(14, 20); if (g.items.filter(i => i.type === 'wood').length < 3) d.dig = 1.1; } }
+    }
+    // winter guard: a dog with a warm house barks wolves away
+    if (s === 3 && g.kennel.built) g.wolves.forEach(w => {
+      if (w.state === 'hunt' && dist(w.x, w.y, d.x, d.y) < 95) { w.state = 'retreat'; w.rt = 2.4; g.stats.wolves++; if (d.barkT <= 0) { SFX.bark(); d.barkT = 0.8; floatText(d.x, d.y - 26, 'wolf', '!'); } d.face = w.x > d.x ? 1 : -1; }
+    });
+  }
+  if (sp > 0) { const wp = steerAroundPond(d, tx, ty); tx = wp.x; ty = wp.y; }
+  const dd = dist(d.x, d.y, tx, ty);
+  if (sp > 0 && dd > 3) {
+    const mul = s === 3 && !(g.kennel.built) && d.state === 'friend' ? 1 : s === 3 ? 0.85 : 1;
+    const step = Math.min(dd, sp * mul * dt);
+    d.x += (tx - d.x) / dd * step; d.y += (ty - d.y) / dd * step; d.walk += dt * 12; d.sit = false;
+    if (Math.abs(tx - d.x) > 2) d.face = tx > d.x ? 1 : -1;
+  } else if (d.state !== 'leave') d.sit = true;
+  if (d.state === 'friend' || d.state === 'stray') collide(d, 7);
+  pushOutOfPond(d);
+}
 function spawnTwigs(dt, force) {
   g.spawn.twig -= dt;
   if (force || g.spawn.twig <= 0) {
@@ -729,6 +821,7 @@ function inShade(x, y) {
 function blocked(x, y, r) {
   if (x > CABIN.x0 - r && x < CABIN.x1 + r && y > CABIN.y0 - r && y < CABIN.y1 + r) return true;
   if (dist(x, y, HEARTH.x, HEARTH.y) < 26 + r) return true;
+  if (dist(x, y, KENNEL.x, KENNEL.y) < 24 + r) return true;
   return g.plots.some(pl => (pl.state === 'tree' || pl.state === 'stump') && dist(x, y, pl.x, pl.y) < 12 + r);
 }
 function collide(o, r) {
@@ -741,6 +834,7 @@ function collide(o, r) {
   }
   const circ = (cx, cy, cr) => { const dd = dist(o.x, o.y, cx, cy); if (dd < cr + r && dd > 0.01) { o.x = cx + (o.x - cx) / dd * (cr + r); o.y = cy + (o.y - cy) / dd * (cr + r); } };
   circ(HEARTH.x, HEARTH.y, 16);
+  if (g.kennel.built) circ(KENNEL.x, KENNEL.y - 4, 16);
   g.plots.forEach(pl => { if (pl.state === 'tree') circ(pl.x, pl.y, pl.elder ? 13 : 9); else if (pl.state === 'stump') circ(pl.x, pl.y, 9); });
 }
 
@@ -759,11 +853,23 @@ function bestAction() {
   bd = 38;
   g.plots.forEach(pl => { if ((pl.state === 'tree' || pl.state === 'dead') && !pl.elder) { const dd = dist(p.x, p.y, pl.x, pl.y); if (dd < bd) { bd = dd; target = pl; } } });
   if (target) return { type: 'chop', plot: target, x: target.x, y: target.y - (target.state === 'tree' ? 70 : 24), icon: 'axe' };
+  if (g.dog && g.dog.state === 'stray' && near(g.dog.x, g.dog.y, 46)) return { type: 'adopt', x: g.dog.x, y: g.dog.y - 34, icon: 'heart' };
+  if (g.dog && g.dog.state === 'friend' && !g.kennel.built && p.wood > 0 && near(KENNEL.x, KENNEL.y, 46)) return { type: 'build', x: KENNEL.x, y: KENNEL.y - 40, icon: 'house' };
   return null;
 }
 function doAction() {
   const p = g.player, a = bestAction();
-  if (!a) { SFX.deny(); return; }
+  if (!a) {
+    const d = g.dog; // nothing to do: pet the dog if it's beside you
+    if (d && d.state === 'friend' && dist(p.x, p.y, d.x, d.y) < 40) { d.wag = 0; SFX.whine(); floatText(d.x, d.y - 26, 'heart', ''); burst(d.x, d.y - 14, UIC().health, 4); return; }
+    SFX.deny(); return;
+  }
+  if (a.type === 'adopt') { g.dog.state = 'friend'; g.dog.sit = false; g.stats.dog = 1; SFX.bark(); SFX.select(); burst(g.dog.x, g.dog.y - 14, UIC().health, 14); floatText(g.dog.x, g.dog.y - 30, 'heart', '+'); return; }
+  if (a.type === 'build') {
+    p.wood--; g.kennel.wood++; SFX.build(); burst(KENNEL.x, KENNEL.y - 10, '#c9a27a', 8);
+    if (g.kennel.wood >= KENNEL.need) { g.kennel.built = true; g.stats.kennel = 1; SFX.win(); burst(KENNEL.x, KENNEL.y - 20, UIC().health, 18); floatText(KENNEL.x, KENNEL.y - 46, 'dog', '♥'); }
+    return;
+  }
   if (a.type === 'feed') { p.wood--; g.fuel = Math.min(100, g.fuel + 22); SFX.fire(); burst(HEARTH.x, HEARTH.y - 8, '#ffb347', 14); floatText(HEARTH.x, HEARTH.y - 30, 'fire', '+'); }
   else if (a.type === 'water') { p.bucket--; a.plot.thirst = 1; SFX.water(); burst(a.plot.x, a.plot.y - 6, PAL[1].water2, 12); }
   else if (a.type === 'plant') { p.seeds--; a.plot.state = 'sprout'; a.plot.growth = 0; a.plot.thirst = 1; a.plot.nibble = 0; g.stats.planted++; SFX.plant(); burst(a.plot.x, a.plot.y, '#7a5235', 10); }
@@ -872,6 +978,8 @@ function drawWorld() {
   g.items.forEach(it => list.push({ y: it.y, f: () => drawIcon(it.type, it.x, it.y - 6 - it.z, 15, it) }));
   g.rabbits.forEach(r => list.push({ y: r.y, f: () => drawRabbit(r) }));
   g.wolves.forEach(w => list.push({ y: w.y, f: () => drawWolf(w) }));
+  if (g.dog) list.push({ y: g.dog.y, f: () => drawDog(g.dog) });
+  if (g.kennel.built || (g.dog && g.dog.state === 'friend')) list.push({ y: KENNEL.y, f: drawKennel });
   if (!g.demo) list.push({ y: g.player.y, f: drawPlayer });
   list.sort((a, b) => a.y - b.y).forEach(o => o.f());
   // particles
@@ -1011,7 +1119,7 @@ function drawRabbit(r) {
   ellipse(x, y - 6, 9, 6.5, '#b8a48c'); circle(x + r.face * 7, y - 10, 5, '#b8a48c');
   ellipse(x + r.face * 6, y - 18, 2, 6, '#b8a48c'); ellipse(x + r.face * 9, y - 18, 2, 6, '#a8947c');
   circle(x - r.face * 9, y - 7, 3, '#ffffff'); circle(x + r.face * 9, y - 11, 1.2, '#222');
-  if (r.state === 'eat') drawIcon('alert', x, y - 32 + Math.sin(time * 10) * 2, 14);
+  if (r.state !== 'flee' && !g.demo && settings.hints !== 'off') drawAlertBubble(x, y - 24);
 }
 function drawWolf(w) {
   const x = w.x, y = w.y, st = Math.sin(w.step) * 2, f = w.face;
@@ -1022,6 +1130,52 @@ function drawWolf(w) {
   circle(x + f * 15, y - 15, 7, '#6b717b');
   ctx.beginPath(); ctx.moveTo(x + f * 15, y - 15); ctx.lineTo(x + f * 26, y - 12); ctx.lineTo(x + f * 15, y - 10); ctx.fill();
   ctx.fillStyle = '#4b5059'; ctx.beginPath(); ctx.moveTo(x + f * 11, y - 19); ctx.lineTo(x + f * 13, y - 28); ctx.lineTo(x + f * 17, y - 20); ctx.fill();
+}
+function drawDog(d) {
+  const x = d.x, y = d.y, f = d.face, st = d.sit ? 0 : Math.sin(d.walk) * 2.5;
+  const shiver = g.season === 3 && !g.kennel.built && d.state === 'friend' && !settings.reduceMotion ? Math.sin(time * 50) * 0.8 : 0;
+  const fur = '#c98b4f', dark = '#8a5a32';
+  ellipse(x, y + 2, 13, 4, 'rgba(0,0,0,0.2)');
+  ctx.save(); ctx.translate(x + shiver, y);
+  // tail
+  const wag = Math.sin(d.wag) * (d.state === 'friend' ? 0.7 : 0.25);
+  ctx.strokeStyle = fur; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-f * 10, d.sit ? -6 : -10); ctx.quadraticCurveTo(-f * 16, -16, -f * 15 + Math.sin(wag) * 6 * f, -22 + Math.cos(wag) * 2); ctx.stroke();
+  // legs
+  ctx.strokeStyle = dark; ctx.lineWidth = 3;
+  if (d.sit) { ctx.beginPath(); ctx.moveTo(f * 5, -6); ctx.lineTo(f * 6, 0); ctx.moveTo(f * 1, -6); ctx.lineTo(f * 2, 0); ctx.stroke(); ellipse(-f * 4, -4, 7, 4.5, fur); }
+  else { ctx.beginPath(); ctx.moveTo(-7, -6); ctx.lineTo(-7 + st, 0); ctx.moveTo(7, -6); ctx.lineTo(7 - st, 0); ctx.moveTo(-3, -6); ctx.lineTo(-3 - st, 0); ctx.moveTo(3, -6); ctx.lineTo(3 + st, 0); ctx.stroke(); }
+  // body + head
+  ellipse(d.sit ? -f * 2 : 0, d.sit ? -11 : -10, d.sit ? 8 : 11, 6, fur);
+  circle(f * 10, d.sit ? -19 : -15, 6.5, fur);
+  ellipse(f * 15, d.sit ? -17 : -13, 3.5, 2.6, '#e8c49a');
+  circle(f * 18, d.sit ? -18 : -14, 1.4, '#2a1a12');
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(f * 7, d.sit ? -21 : -17, 2.4, 5, f * 0.5, 0, 6.28); ctx.fill();
+  circle(f * 11.5, d.sit ? -21 : -17, 1.1, '#2a1a12');
+  if (d.state === 'friend') { ctx.strokeStyle = '#d94b3d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(f * 6, d.sit ? -15 : -11); ctx.lineTo(f * 10, d.sit ? -13 : -9); ctx.stroke(); }
+  if (g.season === 3 && d.state === 'friend') { ctx.fillStyle = '#d94b3d'; ctx.fillRect(-f * 6 - 5, d.sit ? -16 : -15, 10, 4); }
+  if (d.carry === 'fruit') drawIcon('fruit', f * 19, d.sit ? -13 : -9, 9);
+  if (d.dig > 0) for (let i = 0; i < 3; i++) circle(f * 12 + rand(-6, 6), rand(-6, 0), 2, '#8a6a48');
+  if (g.season === 1 && d.sit) { ctx.fillStyle = '#e86a7a'; ctx.fillRect(f * 15, (d.sit ? -15 : -11), 2.5, 4 + Math.abs(Math.sin(time * 9)) * 2); }
+  ctx.restore();
+}
+function drawKennel() {
+  const x = KENNEL.x, y = KENNEL.y, k = g.kennel;
+  if (!k.built) {
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(90,60,30,0.6)'; ctx.lineWidth = 2; rr(x - 20, y - 26, 40, 28, 4); ctx.stroke(); ctx.setLineDash([]);
+    for (let i = 0; i < k.wood; i++) drawIcon('wood', x - 8 + (i % 2) * 14, y - 4 - Math.floor(i / 2) * 7, 13);
+    ctx.fillStyle = 'rgba(30,20,10,0.75)'; ctx.font = 'bold 12px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(k.wood + '/' + KENNEL.need, x, y + 12);
+    return;
+  }
+  ellipse(x, y + 2, 26, 6, 'rgba(0,0,0,0.18)');
+  ctx.fillStyle = '#b07a4a'; ctx.fillRect(x - 18, y - 22, 36, 24);
+  ctx.strokeStyle = '#8c5e36'; ctx.lineWidth = 1.5; for (let yy = y - 16; yy < y + 2; yy += 6) { ctx.beginPath(); ctx.moveTo(x - 18, yy); ctx.lineTo(x + 18, yy); ctx.stroke(); }
+  ctx.fillStyle = '#3a2618'; ctx.beginPath(); ctx.moveTo(x - 8, y + 2); ctx.lineTo(x - 8, y - 9); ctx.arc(x, y - 9, 8, 3.14, 0); ctx.lineTo(x + 8, y + 2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#a8483a'; ctx.beginPath(); ctx.moveTo(x - 23, y - 20); ctx.lineTo(x, y - 38); ctx.lineTo(x + 23, y - 20); ctx.closePath(); ctx.fill();
+  if (seasonWeight(3) > 0.01) { ctx.globalAlpha = seasonWeight(3); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(x - 14, y - 26); ctx.lineTo(x, y - 38); ctx.lineTo(x + 14, y - 26); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1; }
+  ctx.fillStyle = '#f2a53a'; rr(x - 9, y - 31, 18, 6, 2); ctx.fill();
+  if (g.dog && g.dog.state === 'friend' && dist(g.dog.x, g.dog.y, x, y) < 30) circle(x, y - 6, 3, '#c98b4f');
 }
 function drawWolfEyes() {
   g.wolves.forEach(w => { const f = w.face; circle(w.x + f * 18, w.y - 17, 1.8, '#ffe14a'); circle(w.x + f * 14, w.y - 17, 1.8, '#ffe14a'); });
@@ -1106,6 +1260,8 @@ function drawIcon(type, x, y, s, opt) {
     case 'hunger': circle(0, 0, 7, '#d8c9a8'); ctx.fillStyle = '#5a3a24'; ctx.fillRect(-0.8, -10, 1.6, 4); ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.arc(7, 0, 4, 1.57, 4.71); ctx.fill(); ctx.beginPath(); ctx.arc(-7, 0, 4, -1.57, 1.57); ctx.fill(); break;
     case 'alert': circle(0, 0, 8, UIC().danger); ctx.fillStyle = '#fff'; ctx.fillRect(-1.3, -5, 2.6, 6); ctx.fillRect(-1.3, 2.5, 2.6, 2.6); break;
     case 'wind': ctx.strokeStyle = '#e9e2d0'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-9, -4); ctx.lineTo(4, -4); ctx.arc(4, -7, 3, 1.57, -1.2, true); ctx.moveTo(-9, 2); ctx.lineTo(7, 2); ctx.arc(7, 5, 3, -1.57, 1.2); ctx.stroke(); break;
+    case 'dog': circle(0, 1, 7, '#c98b4f'); ctx.fillStyle = '#8a5a32'; ctx.beginPath(); ctx.ellipse(-6, -1, 2.6, 6, 0.3, 0, 6.28); ctx.fill(); ctx.beginPath(); ctx.ellipse(6, -1, 2.6, 6, -0.3, 0, 6.28); ctx.fill(); ellipse(0, 4, 3.6, 2.6, '#e8c49a'); circle(0, 3, 1.4, '#2a1a12'); circle(-2.6, -1, 1.1, '#2a1a12'); circle(2.6, -1, 1.1, '#2a1a12'); break;
+    case 'house': ctx.fillStyle = '#b07a4a'; ctx.fillRect(-7, -2, 14, 10); ctx.fillStyle = '#3a2618'; ctx.beginPath(); ctx.arc(0, 3, 3.5, 3.14, 0); ctx.lineTo(3.5, 8); ctx.lineTo(-3.5, 8); ctx.fill(); ctx.fillStyle = '#a8483a'; ctx.beginPath(); ctx.moveTo(-10, -1); ctx.lineTo(0, -10); ctx.lineTo(10, -1); ctx.closePath(); ctx.fill(); break;
     case 'cross': ctx.strokeStyle = UIC().danger; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, 6); ctx.moveTo(6, -6); ctx.lineTo(-6, 6); ctx.stroke(); break;
   }
   ctx.restore();
@@ -1122,6 +1278,16 @@ function drawKey(x, y, label, h) {
 function primaryLabel(a) { if (lastInput === 'pad') return { action: 'A', eat: 'X', pause: 'Start' }[a] || '?'; if (touch.used) return ''; return keyLabel(settings.keys[a][0]); }
 
 // bubble: [key][icon] above a world target
+// a small red "!!" bubble: danger, act now
+function drawAlertBubble(x, y) {
+  const bob = settings.reduceMotion ? 0 : Math.sin(time * 10) * 2, pulse = settings.reduceMotion ? 1 : 1 + 0.08 * Math.sin(time * 12);
+  ctx.save(); ctx.translate(x, y + bob); ctx.scale(pulse, pulse);
+  ctx.fillStyle = UIC().danger; rr(-15, -24, 30, 22, 7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-5, -2); ctx.lineTo(0, 5); ctx.lineTo(5, -2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5; rr(-15, -24, 30, 22, 7); ctx.stroke();
+  ctx.fillStyle = '#ffffff'; ctx.font = '900 15px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!!', 0, -12.5);
+  ctx.restore();
+}
 function drawBubble(x, y, parts, alpha) {
   const bob = settings.reduceMotion ? 0 : Math.sin(time * 4) * 2.5;
   y += bob;
@@ -1171,12 +1337,13 @@ function drawGuidance() {
   const items = t => g.items.filter(i => i.type === t);
   if (s === 0) {
     const r = g.rabbits.find(r => r.state !== 'flee');
-    if (r) { target = r; parts = [{ icon: 'rabbit' }]; }
+    if (r) { target = { x: r.x, y: r.y - 24 }; parts = 'alert'; }
     else if (p.seeds > 0) { const pl = nearest(g.plots.filter(q => q.state === 'empty'), p.x, p.y); if (pl) { target = { x: pl.x, y: pl.y - 22 }; parts = [{ icon: 'seed' }, { text: '→' }, { icon: 'sprout' }]; } }
     else if (items('seed').length) { const it = nearest(items('seed'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'seed' }]; }
   } else if (s === 1) {
     const thirsty = g.plots.filter(q => q.state === 'sprout' && q.thirst < 0.6);
-    if (!p.inShade && p.hp < 70) { const t = nearestShade(); if (t) { target = t; parts = [{ icon: 'sun' }, { text: '→' }, { icon: 'shade' }]; } }
+    if (g.dog && g.dog.state === 'stray' && p.hp >= 50 && !thirsty.length) { target = { x: g.dog.x, y: g.dog.y - 34 }; parts = [{ icon: 'dog' }, { text: '?' }]; }
+    else if (!p.inShade && p.hp < 70) { const t = nearestShade(); if (t) { target = t; parts = [{ icon: 'sun' }, { text: '→' }, { icon: 'shade' }]; } }
     else if (thirsty.length && p.bucket === 0) { const a = Math.atan2(p.y - POND.y, p.x - POND.x); target = { x: POND.x + Math.cos(a) * POND.rx * g.pond * 0.7, y: POND.y + Math.sin(a) * POND.ry * g.pond * 0.7 - 10 }; parts = [{ icon: 'bucket' }]; }
     else if (thirsty.length) { const pl = nearest(thirsty, p.x, p.y); target = { x: pl.x, y: pl.y - 40 }; parts = [{ icon: 'bucket' }, { text: '→' }, { icon: 'sprout' }]; }
   } else if (s === 2) {
@@ -1188,7 +1355,8 @@ function drawGuidance() {
     else if (g.fuel < 60 && items('wood').length) { const it = nearest(items('wood'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'wood' }]; }
     else if (!p.warm) { target = { x: HEARTH.x, y: HEARTH.y - 30 }; parts = [{ icon: 'snow' }, { text: '→' }, { icon: 'fire' }]; }
   }
-  if (target) { drawBubble(target.x, target.y, parts, 0.9); drawArrowTo(target.x, target.y); }
+  if (!target && s !== 3 && g.dog && g.dog.state === 'friend' && !g.kennel.built && p.wood > 0) { target = { x: KENNEL.x, y: KENNEL.y - 40 }; parts = [{ icon: 'wood' }, { text: '→' }, { icon: 'house' }]; }
+  if (target) { if (parts !== 'alert') drawBubble(target.x, target.y, parts, 0.9); drawArrowTo(target.x, target.y); }
 }
 function nearestShade() {
   const p = g.player, cands = [{ x: 480, y: 282 }];
@@ -1441,6 +1609,7 @@ function drawPause() {
   drawKey(lx + 12, ly + 32, keyLabel(k.eat[0]), 22); ctx.fillStyle = '#fdf6e3'; ctx.textAlign = 'left'; ctx.fillText('eat a fruit to heal', lx + 50, ly + 32);
   ctx.fillText('Walk over seeds, fruit and wood to pick them up.', lx, ly + 64);
   ctx.fillText('Survive ' + YEARS + ' winters to win. Trees you keep pay off every year.', lx, ly + 90);
+  drawIcon('dog', lx + 8, ly + 116, 16); ctx.fillText('A stray dog turns up in summer. Adopt it and build its house (' + KENNEL.need + ' wood).', lx + 24, ly + 116);
   ctx.textAlign = 'center';
 }
 function drawEnd(won) {
@@ -1458,6 +1627,7 @@ function drawEnd(won) {
   const rx = W / 2 - 150, ry = 250;
   for (let i = Math.min(12, Math.ceil(s.score / 60)); i > 0; i--) circle(rx, ry, 8 + i * 4, i % 2 ? '#c9a27a' : '#b08458');
   circle(rx, ry, 8, '#7a5235');
+  if (s.dog) { drawIcon('dog', rx + 52, ry + 44, 24); if (s.kennel) drawIcon('house', rx + 74, ry + 40, 20); }
   ctx.fillStyle = '#fdf6e3'; ctx.font = '900 30px ' + FONT; ctx.fillText(String(s.score), rx, ry + 76);
   ctx.font = '600 12px ' + FONT; ctx.fillText(s.best ? 'new best!' : 'rings · best ' + best, rx, ry + 100);
   const stats = [['flower', 'Years', s.years], ['shade', 'Trees standing', s.trees], ['sprout', 'Seeds planted', s.planted], ['fruit', 'Fruit gathered', s.fruit], ['rabbit', 'Rabbits shooed', s.rabbits], ['wolf', 'Wolves held off', s.wolves]];
