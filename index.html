@@ -1,0 +1,1505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Perennial</title>
+<meta name="description" content="Perennial: a four-seasons survival game. Plant in spring, shelter in summer, harvest in fall, keep the hearth alive through winter.">
+<style>
+:root{
+  --bg:#0f1418;
+  --frame:#0b0f12;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0;background:var(--bg);overflow:hidden}
+body{touch-action:none;-webkit-user-select:none;user-select:none}
+#c{display:block;width:100%;height:100%;outline:none;background:var(--frame)}
+#c:focus,#c:focus-visible{outline:none}
+</style>
+<canvas id="c" tabindex="0" aria-label="Perennial game. Use WASD or arrow keys to move, Space to act, Q to eat, Escape to pause."></canvas>
+<noscript style="color:#eee;font:16px system-ui;position:fixed;inset:0;display:grid;place-items:center">Perennial needs JavaScript to run.</noscript>
+<script>
+'use strict';
+/* =====================================================================
+   PERENNIAL  -  a Four Seasons game for the ThunderHacks 2026 Algoma Game Jam
+   One tree is shade in summer, food in fall and fire in winter.
+   All art is drawn in code. All audio is synthesized in code. No libraries.
+   ===================================================================== */
+
+// ---------------------------------------------------------------- constants
+const W = 960, H = 540;
+const YEARS = 3;
+const CAP = 6; // a basket holds 6 fruit, your arms hold 6 logs
+const SEASON_NAMES = ['SPRING', 'SUMMER', 'FALL', 'WINTER'];
+const PLAY = { x0: 34, y0: 74, x1: 926, y1: 512 };
+const POND = { x: 178, y: 345, rx: 112, ry: 72 };
+const CABIN = { x0: 420, x1: 540, y0: 182, y1: 262 };
+const PORCH = { x0: 418, x1: 542, y0: 262, y1: 300 };
+const HEARTH = { x: 480, y: 336 };
+const DIFF = {
+  gentle: { season: 52, heat: 0.6, cold: 0.6, hunger: 0.65, wolves: 0.6, fruit: 1.35, burn: 0.75 },
+  normal: { season: 42, heat: 1.0, cold: 1.0, hunger: 1.0, wolves: 1.0, fruit: 1.0, burn: 1.0 },
+  hard:   { season: 36, heat: 1.3, cold: 1.25, hunger: 1.25, wolves: 1.45, fruit: 0.8, burn: 1.2 }
+};
+
+// ---------------------------------------------------------------- utilities
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a, b) => a + Math.random() * (b - a);
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const pick = arr => arr[(Math.random() * arr.length) | 0];
+const hexCache = {};
+function hexRGB(h) {
+  if (hexCache[h]) return hexCache[h];
+  const s = h.replace('#', '');
+  return (hexCache[h] = [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)]);
+}
+function mixHex(a, b, t) {
+  const A = hexRGB(a), B = hexRGB(b);
+  return 'rgb(' + ((A[0] + (B[0] - A[0]) * t) | 0) + ',' + ((A[1] + (B[1] - A[1]) * t) | 0) + ',' + ((A[2] + (B[2] - A[2]) * t) | 0) + ')';
+}
+function rgba(h, a) { const c = hexRGB(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+
+// ---------------------------------------------------------------- settings
+const DEFAULT_KEYS = {
+  up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
+  action: ['Space', 'KeyE'], eat: ['KeyQ', 'KeyF'], pause: ['Escape', 'KeyP']
+};
+const settings = Object.assign({
+  difficulty: 'normal', colorblind: false, hints: 'auto', reduceMotion: false, music: 6, sfx: 8,
+  keys: JSON.parse(JSON.stringify(DEFAULT_KEYS))
+}, load('perennial.settings', {}));
+for (const k in DEFAULT_KEYS) if (!settings.keys[k]) settings.keys[k] = DEFAULT_KEYS[k].slice();
+try { if (matchMedia('(prefers-reduced-motion: reduce)').matches && load('perennial.settings', null) === null) settings.reduceMotion = true; } catch (e) {}
+function saveSettings() { store('perennial.settings', settings); }
+let best = load('perennial.best', 0);
+
+function keyLabel(code) {
+  if (!code) return '?';
+  const map = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Space: 'Space', Escape: 'Esc', Enter: 'Enter',
+    ShiftLeft: 'Shift', ShiftRight: 'Shift', ControlLeft: 'Ctrl', ControlRight: 'Ctrl', AltLeft: 'Alt', AltRight: 'Alt',
+    Backspace: '⌫', Tab: 'Tab', Slash: '/', Period: '.', Comma: ',', Semicolon: ';', Quote: "'", BracketLeft: '[', BracketRight: ']',
+    Minus: '-', Equal: '=', Backquote: '`', Backslash: '\\' };
+  if (map[code]) return map[code];
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'N' + code.slice(6);
+  return code.length > 6 ? code.slice(0, 6) : code;
+}
+
+// ---------------------------------------------------------------- palettes
+// One flat "paper diorama" style. Every season shares shapes; only the palette and the rules change.
+const PAL = [
+  { ground: '#a5d784', ground2: '#8cc56c', leaf: '#5db85b', leaf2: '#3d9448', trunk: '#7a5235', water: '#67c2e4', water2: '#b2e6f5',
+    accent: '#f7a8c8', accent2: '#fff1a1', border: '#3f8a4a', border2: '#2c6a39', dirt: '#b39066', roof: '#a8483a' },
+  { ground: '#dccf72', ground2: '#c9b95a', leaf: '#3f9c4a', leaf2: '#2b7a37', trunk: '#6e4a2e', water: '#3cafd8', water2: '#97dcf1',
+    accent: '#ffd24a', accent2: '#ff9f3a', border: '#367f40', border2: '#24602e', dirt: '#b48d55', roof: '#a8483a' },
+  { ground: '#cf9e5f', ground2: '#bb894b', leaf: '#e8742d', leaf2: '#c24f1f', trunk: '#5e3d27', water: '#4f8faa', water2: '#89bacd',
+    accent: '#f2b33d', accent2: '#b8462a', border: '#a5552b', border2: '#6c3a22', dirt: '#9a7046', roof: '#8e3b30' },
+  { ground: '#e9eff5', ground2: '#d2deea', leaf: '#cfdde8', leaf2: '#9fb3c4', trunk: '#5a4636', water: '#c3e5f2', water2: '#eef9fd',
+    accent: '#8fb7d8', accent2: '#ffffff', border: '#4c6a73', border2: '#34505a', dirt: '#c9cfd6', roof: '#eef4f8' }
+];
+function UIC() {
+  return settings.colorblind ? {
+    health: '#3a8fd6', heat: '#E69F00', cold: '#56B4E9', danger: '#D55E00', ok: '#009E73', fruit: '#f08c00', fruitHi: '#ffd28a',
+    season: ['#CC79A7', '#F0E442', '#D55E00', '#56B4E9'], fuel: '#E69F00'
+  } : {
+    health: '#e5484d', heat: '#ff9f3a', cold: '#7cc8f0', danger: '#ff5a4a', ok: '#7fd06b', fruit: '#e23b3b', fruitHi: '#ff9a8a',
+    season: ['#86d26f', '#ffd24a', '#e8742d', '#a9d8f2'], fuel: '#ffb347'
+  };
+}
+
+// ---------------------------------------------------------------- canvas
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let scale = 1, offX = 0, offY = 0, dpr = 1;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || innerWidth, h = cv.clientHeight || innerHeight;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  scale = Math.min(w / W, h / H); offX = (w - W * scale) / 2; offY = (h - H * scale) / 2;
+}
+addEventListener('resize', resize);
+resize();
+const fog = document.createElement('canvas'); fog.width = W / 2; fog.height = H / 2;
+const fctx = fog.getContext('2d');
+
+// =====================================================================
+// AUDIO  (everything synthesized with WebAudio)
+// =====================================================================
+const A = { ctx: null, master: null, music: null, sfx: null, noise: null, amb: null, ambF: null, ambLfo: null, ambLfoG: null, cic: null, cicG: null,
+  season: 0, step: 0, nextT: 0, bar: 0, timer: null, duck: 1 };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === 'suspended') A.ctx.resume(); return; }
+  try { A.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  const c = A.ctx;
+  A.master = c.createGain(); A.master.gain.value = 0.9; A.master.connect(c.destination);
+  const comp = c.createDynamicsCompressor(); comp.connect(A.master);
+  A.music = c.createGain(); A.music.connect(comp);
+  A.sfx = c.createGain(); A.sfx.connect(comp);
+  applyVolumes();
+  const len = c.sampleRate * 2, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  A.noise = buf;
+  // ambience bed: looping noise through a filter, with an LFO for gusts
+  const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
+  A.ambF = c.createBiquadFilter(); A.ambF.type = 'bandpass'; A.ambF.frequency.value = 800; A.ambF.Q.value = 0.7;
+  A.amb = c.createGain(); A.amb.gain.value = 0;
+  src.connect(A.ambF); A.ambF.connect(A.amb); A.amb.connect(A.sfx);
+  A.ambLfo = c.createOscillator(); A.ambLfo.frequency.value = 0.15;
+  A.ambLfoG = c.createGain(); A.ambLfoG.gain.value = 0;
+  A.ambLfo.connect(A.ambLfoG); A.ambLfoG.connect(A.amb.gain);
+  const fLfoG = c.createGain(); fLfoG.gain.value = 0; A.fLfoG = fLfoG; A.ambLfo.connect(fLfoG); fLfoG.connect(A.ambF.frequency);
+  src.start(); A.ambLfo.start();
+  // cicadas for summer
+  A.cic = c.createOscillator(); A.cic.type = 'square'; A.cic.frequency.value = 4300;
+  const cf = c.createBiquadFilter(); cf.type = 'bandpass'; cf.frequency.value = 4300; cf.Q.value = 8;
+  const am = c.createGain(); am.gain.value = 0;
+  const amL = c.createOscillator(); amL.frequency.value = 38; const amLG = c.createGain(); amLG.gain.value = 1;
+  amL.connect(amLG); amLG.connect(am.gain);
+  A.cicG = c.createGain(); A.cicG.gain.value = 0;
+  A.cic.connect(cf); cf.connect(am); am.connect(A.cicG); A.cicG.connect(A.sfx);
+  A.cic.start(); amL.start();
+  A.nextT = c.currentTime + 0.1;
+  A.timer = setInterval(scheduleMusic, 40);
+  setAmbience(A.season, true);
+}
+function applyVolumes() {
+  if (!A.ctx) return;
+  const t = A.ctx.currentTime;
+  A.music.gain.setTargetAtTime((settings.music / 10) * 0.55 * A.duck, t, 0.1);
+  A.sfx.gain.setTargetAtTime((settings.sfx / 10) * 0.9, t, 0.05);
+}
+function setAmbience(s, now) {
+  A.season = s;
+  if (!A.ctx) return;
+  const t = A.ctx.currentTime, k = now ? 0.05 : 1.2;
+  const cfg = [
+    { type: 'highpass', f: 2600, q: 0.4, g: 0.05, lfo: 0.012, ff: 0, cic: 0 },   // spring rain
+    { type: 'bandpass', f: 1800, q: 0.6, g: 0.006, lfo: 0.004, ff: 0, cic: 0.012 }, // summer cicadas
+    { type: 'bandpass', f: 700, q: 1.1, g: 0.05, lfo: 0.04, ff: 300, cic: 0 },     // fall wind
+    { type: 'bandpass', f: 420, q: 4.5, g: 0.06, lfo: 0.05, ff: 220, cic: 0 }      // winter howl
+  ][s];
+  A.ambF.type = cfg.type;
+  A.ambF.frequency.setTargetAtTime(cfg.f, t, k); A.ambF.Q.setTargetAtTime(cfg.q, t, k);
+  A.amb.gain.setTargetAtTime(cfg.g, t, k); A.ambLfoG.gain.setTargetAtTime(cfg.lfo, t, k);
+  A.fLfoG.gain.setTargetAtTime(cfg.ff, t, k); A.cicG.gain.setTargetAtTime(cfg.cic, t, k);
+}
+const MUSIC = [
+  { bpm: 112, root: 60, scale: [0, 2, 4, 7, 9], chords: [0, 7, 9, 5], inst: 'pluck', density: 0.8, octave: 12 },
+  { bpm: 80, root: 57, scale: [0, 2, 4, 6, 7, 9, 11], chords: [0, 2, 0, 7], inst: 'pad', density: 0.35, octave: 12 },
+  { bpm: 94, root: 57, scale: [0, 2, 3, 5, 7, 9, 10], chords: [0, 5, 0, 10], inst: 'reed', density: 0.6, octave: 12 },
+  { bpm: 62, root: 62, scale: [0, 2, 3, 7, 8], chords: [0, 8, 3, 10], inst: 'bell', density: 0.3, octave: 12 }
+];
+let musicOn = true, melodyIdx = 2;
+function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+function scheduleMusic() {
+  if (!A.ctx || A.ctx.state !== 'running') return;
+  const c = A.ctx;
+  while (A.nextT < c.currentTime + 0.25) {
+    const m = MUSIC[A.season], stepDur = 60 / m.bpm / 2;
+    if (musicOn) playStep(m, A.step, A.nextT, stepDur);
+    A.nextT += stepDur; A.step++;
+    if (A.step % 8 === 0) A.bar++;
+  }
+}
+function playStep(m, step, t, sd) {
+  const barStep = step % 8, chord = m.chords[A.bar % 4];
+  const root = m.root + chord;
+  if (barStep === 0) {
+    voice('bass', mtof(root - 24), t, sd * 7, 0.09);
+    if (m.inst === 'pad') { [0, 4, 7].forEach(i => voice('pad', mtof(root + i), t, sd * 8, 0.035)); }
+    if (m.inst === 'bell') voice('pad', mtof(root), t, sd * 8, 0.02);
+  }
+  if (barStep === 4 && m.inst === 'pluck') voice('bass', mtof(root - 17), t, sd * 3, 0.06);
+  if (Math.random() < m.density) {
+    melodyIdx = clamp(melodyIdx + pick([-2, -1, -1, 0, 1, 1, 2]), 0, m.scale.length * 2 - 1);
+    const oct = Math.floor(melodyIdx / m.scale.length), deg = m.scale[melodyIdx % m.scale.length];
+    const note = m.root + m.octave + oct * 12 + deg;
+    const strong = barStep % 2 === 0;
+    voice(m.inst, mtof(note), t, m.inst === 'bell' ? 2.4 : sd * (strong ? 1.8 : 1.1), strong ? 0.07 : 0.05);
+  }
+}
+function voice(kind, f, t, dur, vol) {
+  const c = A.ctx, g = c.createGain(), o = c.createOscillator();
+  g.connect(A.music);
+  if (kind === 'pluck') { o.type = 'triangle'; env(g, t, 0.005, dur, vol); }
+  else if (kind === 'pad') { o.type = 'sine'; env(g, t, Math.min(0.6, dur * 0.4), dur, vol); }
+  else if (kind === 'bass') { o.type = 'sine'; env(g, t, 0.02, dur, vol); }
+  else if (kind === 'reed') {
+    o.type = 'sawtooth'; const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1100; lp.Q.value = 1;
+    o.disconnect(); o.connect(lp); lp.connect(g); env(g, t, 0.03, dur, vol * 0.6);
+    o.frequency.value = f; o.start(t); o.stop(t + dur + 0.1); return;
+  } else if (kind === 'bell') {
+    o.type = 'sine'; env(g, t, 0.004, dur, vol);
+    const o2 = c.createOscillator(), g2 = c.createGain(); o2.frequency.value = f * 2.76; o2.connect(g2); g2.connect(A.music);
+    env(g2, t, 0.002, dur * 0.4, vol * 0.35); o2.start(t); o2.stop(t + dur);
+  }
+  o.frequency.value = f; o.connect(g); o.start(t); o.stop(t + dur + 0.1);
+}
+function env(g, t, a, d, v) {
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(Math.max(v, 0.0002), t + a);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+}
+function tone(type, f1, f2, dur, vol, delay) {
+  if (!A.ctx) return;
+  const c = A.ctx, t = c.currentTime + (delay || 0), o = c.createOscillator(), g = c.createGain();
+  o.type = type; o.frequency.setValueAtTime(f1, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  env(g, t, 0.005, dur, vol); o.connect(g); g.connect(A.sfx); o.start(t); o.stop(t + dur + 0.05);
+}
+function noise(dur, vol, ftype, f, q, delay, f2) {
+  if (!A.ctx) return;
+  const c = A.ctx, t = c.currentTime + (delay || 0), s = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain();
+  s.buffer = A.noise; fl.type = ftype; fl.frequency.setValueAtTime(f, t); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  fl.Q.value = q || 1; env(g, t, 0.004, dur, vol);
+  s.connect(fl); fl.connect(g); g.connect(A.sfx); s.start(t, Math.random()); s.stop(t + dur + 0.05);
+}
+const SFX = {
+  pickup() { tone('sine', 660, 990, 0.09, 0.12); tone('sine', 990, 1320, 0.09, 0.08, 0.06); },
+  seed() { tone('triangle', 520, 780, 0.08, 0.12); },
+  plant() { noise(0.12, 0.2, 'lowpass', 600, 1); tone('sine', 300, 600, 0.25, 0.12, 0.05); },
+  fill() { noise(0.3, 0.18, 'bandpass', 900, 2, 0, 400); tone('sine', 220, 440, 0.18, 0.08, 0.05); },
+  water() { noise(0.25, 0.14, 'bandpass', 1500, 1.5, 0, 700); tone('sine', 700, 1100, 0.15, 0.06, 0.08); },
+  chop() { noise(0.08, 0.35, 'bandpass', 1400, 2); tone('sine', 140, 80, 0.12, 0.25); },
+  fell() { noise(0.7, 0.3, 'lowpass', 2000, 0.7, 0, 200); tone('sine', 120, 50, 0.6, 0.25, 0.2); },
+  fire() { noise(0.4, 0.25, 'lowpass', 3000, 0.7, 0, 500); for (let i = 0; i < 5; i++) noise(0.03, 0.15, 'highpass', 3000, 1, 0.05 + i * 0.07); },
+  eat() { for (let i = 0; i < 3; i++) noise(0.05, 0.22, 'bandpass', 2400, 3, i * 0.09); tone('sine', 500, 700, 0.12, 0.06, 0.3); },
+  hurt() { tone('square', 300, 120, 0.22, 0.12); noise(0.15, 0.2, 'lowpass', 800, 1); },
+  squeak() { tone('sine', 1400, 2200, 0.08, 0.08); tone('sine', 1800, 1200, 0.1, 0.06, 0.08); },
+  howl() { if (!A.ctx) return; const c = A.ctx, t = c.currentTime, o = c.createOscillator(), g = c.createGain(), v = c.createOscillator(), vg = c.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(320, t); o.frequency.linearRampToValueAtTime(560, t + 0.6); o.frequency.linearRampToValueAtTime(420, t + 1.8);
+    v.frequency.value = 6; vg.gain.value = 9; v.connect(vg); vg.connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.4); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
+    o.connect(g); g.connect(A.sfx); o.start(t); v.start(t); o.stop(t + 2); v.stop(t + 2); },
+  chime(s) { const base = [72, 76, 69, 74][s] || 72; [0, 4, 7, 12].forEach((n, i) => tone('sine', mtof(base + n), 0, 0.9, 0.07, i * 0.09)); },
+  tick() { tone('sine', 1600, 0, 0.04, 0.05); },
+  crack() { noise(0.12, 0.3, 'highpass', 2500, 1); tone('square', 900, 200, 0.1, 0.05); },
+  wither() { tone('triangle', 500, 160, 0.4, 0.09); },
+  rot() { noise(0.2, 0.12, 'lowpass', 300, 1); },
+  deny() { tone('square', 180, 150, 0.1, 0.06); },
+  menu() { tone('triangle', 880, 0, 0.05, 0.06); },
+  select() { tone('triangle', 660, 990, 0.1, 0.08); },
+  splash() { noise(0.5, 0.35, 'lowpass', 1800, 0.8, 0, 300); tone('sine', 400, 150, 0.3, 0.1); },
+  out() { noise(0.6, 0.2, 'lowpass', 800, 0.7, 0, 100); },
+  win() { [0, 4, 7, 12, 16, 19, 24].forEach((n, i) => tone('triangle', mtof(60 + n), 0, 0.5, 0.08, i * 0.12)); },
+  lose() { [12, 7, 3, 0].forEach((n, i) => tone('triangle', mtof(57 + n), 0, 0.7, 0.08, i * 0.25)); }
+};
+
+// =====================================================================
+// INPUT
+// =====================================================================
+const down = new Set();
+const pressedQ = [];
+let rebinding = null, lastInput = 'keys';
+function actionDown(a) { return settings.keys[a].some(k => down.has(k)); }
+function isKey(a, code) { return settings.keys[a].includes(code); }
+addEventListener('keydown', e => {
+  initAudio(); lastInput = 'keys';
+  if (rebinding) {
+    e.preventDefault();
+    if (e.code !== 'Escape') {
+      // a key can only belong to one action
+      for (const a in settings.keys) settings.keys[a] = settings.keys[a].filter((k, i) => k !== e.code || (a === rebinding && i === 0));
+      settings.keys[rebinding][0] = e.code; saveSettings(); SFX.select();
+    }
+    rebinding = null; return;
+  }
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code) || isKey('action', e.code)) e.preventDefault();
+  if (!e.repeat) pressedQ.push(e.code);
+  down.add(e.code);
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('blur', () => { down.clear(); if (state === 'play') setState('pause'); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setState('pause'); });
+
+// pointer: menus + on-screen touch controls
+const pointer = { x: 0, y: 0 };
+const touch = { active: false, stickId: null, sx: 0, sy: 0, dx: 0, dy: 0, used: false };
+function toGame(cx, cy) { const r = cv.getBoundingClientRect(); return { x: (cx - r.left - offX) / scale, y: (cy - r.top - offY) / scale }; }
+cv.addEventListener('pointermove', e => { const p = toGame(e.clientX, e.clientY); pointer.x = p.x; pointer.y = p.y; if (e.pointerType === 'mouse') lastInput = 'mouse';
+  if (e.pointerId === touch.stickId) { touch.dx = clamp((p.x - touch.sx) / 50, -1, 1); touch.dy = clamp((p.y - touch.sy) / 50, -1, 1); } });
+cv.addEventListener('pointerdown', e => {
+  initAudio(); cv.focus();
+  const p = toGame(e.clientX, e.clientY); pointer.x = p.x; pointer.y = p.y;
+  if (e.pointerType !== 'mouse') touch.used = true;
+  if (state === 'play' && e.pointerType !== 'mouse') {
+    if (dist(p.x, p.y, 860, 450) < 50) { pressedQ.push('@action'); return; }
+    if (dist(p.x, p.y, 760, 480) < 40) { pressedQ.push('@eat'); return; }
+    if (dist(p.x, p.y, 912, 40) < 30) { setState('pause'); return; }
+    if (p.x < W * 0.55) { touch.stickId = e.pointerId; touch.sx = p.x; touch.sy = p.y; touch.dx = 0; touch.dy = 0; cv.setPointerCapture(e.pointerId); }
+    return;
+  }
+  clickQ.push(p);
+});
+const endTouch = e => { if (e.pointerId === touch.stickId) { touch.stickId = null; touch.dx = touch.dy = 0; } };
+cv.addEventListener('pointerup', endTouch); cv.addEventListener('pointercancel', endTouch);
+const clickQ = [];
+
+// gamepad
+const pad = { x: 0, y: 0, prev: [] };
+function pollPad() {
+  pad.x = 0; pad.y = 0;
+  const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = gps && Array.from(gps).find(x => x);
+  if (!gp) return;
+  const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
+  pad.x = Math.abs(ax) > 0.2 ? ax : 0; pad.y = Math.abs(ay) > 0.2 ? ay : 0;
+  const b = i => gp.buttons[i] && gp.buttons[i].pressed;
+  if (b(12)) pad.y = -1; if (b(13)) pad.y = 1; if (b(14)) pad.x = -1; if (b(15)) pad.x = 1;
+  const map = { 0: '@action', 2: '@eat', 1: '@back', 9: '@pause', 12: '@up', 13: '@down', 14: '@left', 15: '@right' };
+  for (const i in map) { const now = b(+i); if (now && !pad.prev[i]) { pressedQ.push(map[i]); lastInput = 'pad'; initAudio(); } pad.prev[i] = now; }
+}
+
+// =====================================================================
+// GAME STATE
+// =====================================================================
+let state = 'title', prevState = 'title';
+let g = null;
+let time = 0;
+function D() { return DIFF[settings.difficulty]; }
+function plotList() {
+  const P = [];
+  [640, 720, 800, 880].forEach(x => [196, 304, 412].forEach(y => P.push({ x, y })));
+  P.push({ x: 318, y: 186, elder: true });
+  P.push({ x: 300, y: 470 });
+  P.push({ x: 380, y: 470 });
+  return P.map(p => ({ x: p.x, y: p.y, elder: !!p.elder, state: 'empty', age: 0, growth: 0, thirst: 1, hits: 0, shake: 0,
+    fruitT: rand(1, 4), branchT: rand(5, 12), seedsLeft: 0, seedT: 0, nibble: 0 }));
+}
+function newGame(demo) {
+  const plots = plotList();
+  const tree = (i, age) => { plots[i].state = 'tree'; plots[i].age = age; plots[i].growth = 1; };
+  tree(12, 6); tree(4, 2); tree(9, 2);
+  if (demo) { tree(0, 2); tree(7, 1); tree(11, 2); tree(14, 1); plots[2].state = 'sprout'; plots[5].state = 'sprout'; }
+  const G = {
+    demo: !!demo, year: 1, season: 0, prevSeason: 3, t: 0, len: D().season,
+    player: { x: 480, y: 408, vx: 0, vy: 0, face: 1, hp: 100, seeds: 0, fruit: 2, wood: 0, bucket: 0, walk: 0, hurtT: 0, chopCD: 0, moved: 0, onIce: false, inShade: false, warm: false, drain: '' },
+    plots, items: [], rabbits: [], wolves: [], parts: [], floats: [], weather: [],
+    fuel: 100, pond: 1, wind: { x: 0, y: 0, a: 0, s: 0, ta: 0, ts: 0, timer: 0 },
+    spawn: { rabbit: 12, wolf: 7, wood: 4, twig: 10 }, stats: { fruit: 0, seeds: 0, planted: 0, rabbits: 0, wolves: 0, wood: 0, years: 0 },
+    banner: 0, shake: 0, flash: 0, cause: '', endless: false, lastTick: -1, crackT: 0, deadT: 0
+  };
+  if (!demo) {
+    [[548, 394], [598, 446], [592, 352]].forEach(([x, y]) => G.items.push(makeItem('seed', x, y)));
+  }
+  for (let i = 0; i < 160; i++) G.weather.push({ x: rand(0, W), y: rand(0, H), s: rand(0.5, 1), r: rand(0, 6.28) });
+  return G;
+}
+function makeItem(type, x, y, z) { return { type, x, y, z: z || 0, vz: 0, vx: 0, vy: 0, t: 0, glint: rand(0, 6) }; }
+const deco = [];
+(function makeDeco() {
+  let n = 0;
+  while (deco.length < 170 && n++ < 3000) {
+    const x = rand(PLAY.x0 + 6, PLAY.x1 - 6), y = rand(PLAY.y0 + 6, PLAY.y1 - 4);
+    if (inPondShape(x, y, 1.15)) continue;
+    if (x > CABIN.x0 - 14 && x < CABIN.x1 + 14 && y > CABIN.y0 - 10 && y < PORCH.y1 + 6) continue;
+    deco.push({ x, y, k: Math.random(), r: rand(0, 6.28) });
+  }
+})();
+const borderTrees = [];
+(function makeBorder() {
+  for (let x = -10; x < W + 30; x += rand(26, 38)) { borderTrees.push({ x, y: rand(30, 62), s: rand(0.8, 1.2) }); borderTrees.push({ x: x + rand(-8, 8), y: rand(520, 548), s: rand(0.8, 1.2) }); }
+  for (let y = 70; y < 520; y += rand(26, 36)) { borderTrees.push({ x: rand(0, 24), y, s: rand(0.8, 1.15) }); borderTrees.push({ x: rand(936, 960), y, s: rand(0.8, 1.15) }); }
+  borderTrees.sort((a, b) => a.y - b.y);
+})();
+function inPondShape(x, y, k) { const a = (x - POND.x) / (POND.rx * k), b = (y - POND.y) / (POND.ry * k); return a * a + b * b < 1; }
+function inPond(x, y) { return inPondShape(x, y, g.pond); }
+function lightRadius() { return g.fuel > 0 ? 70 + 150 * Math.sqrt(g.fuel / 100) : 0; }
+function yearScale() { return 1 + 0.2 * (g.year - 1); }
+
+// =====================================================================
+// SEASON FLOW
+// =====================================================================
+function enterSeason(s) {
+  const p = g.player;
+  g.prevSeason = g.season; g.season = s; g.t = 0; g.len = D().season; g.banner = 3.2; g.lastTick = -1;
+  if (!g.demo) { SFX.chime(s); }
+  setAmbience(s);
+  if (s === 0) {
+    // the thaw: anyone standing on the pond goes through the ice
+    if (!g.demo && inPondShape(p.x, p.y, g.pond)) {
+      hurt(16, 'cold'); SFX.splash(); burst(p.x, p.y, '#bfe6f5', 24);
+      const a = Math.atan2(p.y - POND.y, p.x - POND.x);
+      p.x = POND.x + Math.cos(a) * (POND.rx * g.pond + 22); p.y = POND.y + Math.sin(a) * (POND.ry * g.pond + 22);
+    }
+    g.plots.forEach(pl => { if (pl.state === 'stump' || pl.state === 'dead') { pl.state = 'empty'; } if (pl.state === 'tree') pl.age++; });
+    g.wolves.forEach(w => w.state = 'leave');
+    g.spawn.rabbit = g.year === 1 ? 12 : 5;
+  }
+  if (s === 1) {
+    g.plots.forEach(pl => { if (pl.state === 'sprout') pl.thirst = 1; });
+    g.rabbits.forEach(r => r.state = 'flee');
+  }
+  if (s === 2) {
+    let grown = 0;
+    g.plots.forEach(pl => {
+      if (pl.state === 'sprout') { pl.state = 'tree'; pl.age = 0; pl.growth = 0; grown++; burst(pl.x, pl.y - 20, '#7fd06b', 12); }
+      if (pl.state === 'tree') { pl.fruitT = rand(1, 4); pl.branchT = rand(4, 12); pl.seedsLeft = pl.age >= 1 ? 2 : 1; pl.seedT = rand(4, g.len - 6); }
+    });
+    g.wind.timer = 0;
+  }
+  if (s === 3) {
+    let rotted = 0;
+    g.items = g.items.filter(it => { if (it.type === 'fruit') { rotted++; burst(it.x, it.y, '#6b5a3a', 6); return false; } return true; });
+    if (rotted && !g.demo) SFX.rot();
+    g.spawn.wolf = g.year === 1 ? 9 : 6; g.spawn.wood = 3;
+  }
+}
+function endOfYear() {
+  g.stats.years++;
+  if (!g.endless && g.year >= YEARS) { finish(true); return; }
+  g.year++;
+  enterSeason(0);
+}
+function finish(won) {
+  const s = g.stats, trees = g.plots.filter(p => p.state === 'tree').length;
+  s.trees = trees;
+  s.score = Math.round(s.years * 100 + trees * 25 + s.fruit * 4 + s.planted * 10 + s.rabbits * 5 + s.wolves * 5 + Math.max(0, g.player.hp) * (won ? 1 : 0));
+  s.best = s.score > best; if (s.best) { best = s.score; store('perennial.best', best); }
+  setState(won ? 'win' : 'over');
+  won ? SFX.win() : SFX.lose();
+}
+function hurt(n, cause) {
+  const p = g.player;
+  p.hp -= n; g.flash = 0.35; p.hurtT = 0.6;
+  if (!settings.reduceMotion) g.shake = Math.max(g.shake, 6);
+  SFX.hurt();
+  if (p.hp <= 0) { g.cause = cause; }
+}
+
+// =====================================================================
+// UPDATE
+// =====================================================================
+function update(dt) {
+  if (g.demo) { updateDemo(dt); return; }
+  const p = g.player, s = g.season, d = D(), ys = yearScale();
+  g.t += dt;
+  g.banner = Math.max(0, g.banner - dt);
+  g.flash = Math.max(0, g.flash - dt);
+  g.shake = Math.max(0, g.shake - dt * 20);
+  p.hurtT = Math.max(0, p.hurtT - dt); p.chopCD = Math.max(0, p.chopCD - dt);
+
+  // last seconds of a season tick down
+  const left = g.len - g.t;
+  if (left < 3.5 && Math.ceil(left) !== g.lastTick) { g.lastTick = Math.ceil(left); SFX.tick(); }
+  if (g.t >= g.len) { if (s === 3) endOfYear(); else enterSeason(s + 1); if (state !== 'play') return; }
+
+  // ---------------- movement
+  let ix = 0, iy = 0;
+  if (actionDown('left')) ix -= 1; if (actionDown('right')) ix += 1;
+  if (actionDown('up')) iy -= 1; if (actionDown('down')) iy += 1;
+  ix += pad.x + touch.dx; iy += pad.y + touch.dy;
+  const il = Math.hypot(ix, iy); if (il > 1) { ix /= il; iy /= il; }
+  if (il > 0.1) { p.moved += dt; if (Math.abs(ix) > 0.2) p.face = ix > 0 ? 1 : -1; }
+  let speed = 150;
+  const wading = s !== 3 && inPond(p.x, p.y);
+  p.onIce = s === 3 && inPond(p.x, p.y);
+  if (s === 3 && !p.onIce) speed *= dist(p.x, p.y, HEARTH.x, HEARTH.y) < 70 ? 0.85 : 0.62;
+  if (wading) speed *= 0.5;
+  if (p.onIce) { p.vx = lerp(p.vx, ix * 175, dt * 1.6); p.vy = lerp(p.vy, iy * 175, dt * 1.6); }
+  else { p.vx = ix * speed; p.vy = iy * speed; }
+  let mx = p.vx, my = p.vy;
+  if (s === 2) { mx += g.wind.x * 55; my += g.wind.y * 55; }
+  p.x += mx * dt; p.y += my * dt;
+  if (Math.hypot(mx, my) > 10) p.walk += dt * (p.onIce ? 4 : 10);
+  collide(p, 11);
+
+  // ---------------- input actions
+  while (pressedQ.length) {
+    const k = pressedQ.shift();
+    if (k === '@pause' || isKey('pause', k)) { setState('pause'); pressedQ.length = 0; return; }
+    if (k === '@action' || isKey('action', k)) doAction();
+    if (k === '@eat' || isKey('eat', k)) eat();
+  }
+
+  // ---------------- pickups
+  for (let i = g.items.length - 1; i >= 0; i--) {
+    const it = g.items[i];
+    if (it.z < 4 && dist(p.x, p.y, it.x, it.y) < 22 && !((it.type === 'fruit' && p.fruit >= CAP) || (it.type === 'wood' && p.wood >= CAP))) {
+      g.items.splice(i, 1);
+      if (it.type === 'seed') { p.seeds++; g.stats.seeds++; SFX.seed(); }
+      else if (it.type === 'fruit') { p.fruit++; g.stats.fruit++; SFX.pickup(); }
+      else if (it.type === 'wood') { p.wood++; g.stats.wood++; SFX.pickup(); }
+      floatText(it.x, it.y - 10, it.type, '+1');
+    }
+  }
+
+  // ---------------- season rules
+  p.drain = '';
+  if (s !== 3) { p.hp -= 0.3 * d.hunger * ys * dt; if (p.hp <= 0) g.cause = 'hunger'; }
+  if (s === 0) updateSpring(dt, d, ys);
+  if (s === 1) updateSummer(dt, d, ys);
+  if (s === 2) updateFall(dt, d, ys);
+  if (s === 3) updateWinter(dt, d, ys);
+  updateRabbits(dt); updateWolves(dt);
+
+  // ---------------- items
+  for (let i = g.items.length - 1; i >= 0; i--) {
+    const it = g.items[i]; it.t += dt;
+    if (it.z > 0 || it.vz) { it.vz -= 420 * dt; it.z += it.vz * dt; if (it.z <= 0) { it.z = 0; it.vz = Math.abs(it.vz) > 60 ? -it.vz * 0.35 : 0; } }
+    if (s === 2 && it.type !== 'wood' && it.z < 2) { it.vx += g.wind.x * (it.type === 'fruit' ? 70 : 110) * dt; it.vy += g.wind.y * (it.type === 'fruit' ? 70 : 110) * dt; }
+    it.vx *= 1 - Math.min(1, dt * 2.2); it.vy *= 1 - Math.min(1, dt * 2.2);
+    it.x += it.vx * dt; it.y += it.vy * dt;
+    if (it.x < PLAY.x0 - 4 || it.x > PLAY.x1 + 4 || it.y < PLAY.y0 - 4 || it.y > PLAY.y1 + 4) {
+      burst(clamp(it.x, 10, W - 10), clamp(it.y, 10, H - 10), it.type === 'fruit' ? UIC().fruit : '#8a5a2b', 6); g.items.splice(i, 1);
+    }
+  }
+  updateParts(dt);
+  // pond level
+  const target = s === 0 ? 1 : s === 1 ? lerp(1, 0.42, clamp(g.t / g.len, 0, 1)) : s === 2 ? 0.75 : g.pond;
+  g.pond = lerp(g.pond, target, Math.min(1, dt * (s === 1 ? 4 : 0.4)));
+  g.plots.forEach(pl => pl.shake = Math.max(0, pl.shake - dt * 4));
+
+  if (p.hp <= 0) { p.hp = 0; finish(false); }
+  p.hp = Math.min(100, p.hp);
+}
+
+function updateSpring(dt, d, ys) {
+  const p = g.player;
+  g.plots.forEach(pl => { if (pl.state === 'sprout') pl.growth = Math.min(1, pl.growth + dt / 30); });
+  // rabbits come for the sprouts
+  g.spawn.rabbit -= dt;
+  const sprouts = g.plots.filter(pl => pl.state === 'sprout');
+  if (g.spawn.rabbit <= 0) {
+    g.spawn.rabbit = (g.year === 1 ? 9 : 6) / (d.wolves * ys) * rand(0.8, 1.2);
+    if (sprouts.length && g.rabbits.length < 2 + g.year) {
+      const e = edgePoint(); g.rabbits.push({ x: e.x, y: e.y, state: 'seek', hop: 0, target: null, t: 0, face: 1 });
+    }
+  }
+  spawnTwigs(dt);
+}
+function updateRabbits(dt) {
+  const p = g.player;
+  for (let i = g.rabbits.length - 1; i >= 0; i--) {
+    const r = g.rabbits[i]; r.t += dt; r.hop += dt * 8;
+    const dp = dist(p.x, p.y, r.x, r.y);
+    if (g.season !== 0 && r.state !== 'flee') r.state = 'flee';
+    if (r.state !== 'flee' && dp < 30) { r.state = 'flee'; g.stats.rabbits++; SFX.squeak(); floatText(r.x, r.y - 16, 'rabbit', '!'); if (r.target) r.target.nibble = 0; }
+    if (r.state === 'seek') {
+      if (!r.target || r.target.state !== 'sprout') {
+        let bestD = 1e9; r.target = null;
+        g.plots.forEach(pl => { if (pl.state === 'sprout') { const dd = dist(r.x, r.y, pl.x, pl.y); if (dd < bestD) { bestD = dd; r.target = pl; } } });
+        if (!r.target) { r.state = 'flee'; continue; }
+      }
+      const tx = r.target.x - 12, ty = r.target.y + 4, dd = dist(r.x, r.y, tx, ty);
+      if (dd > 4) { const sp = 62 * (Math.sin(r.hop) > 0 ? 1.6 : 0.3); r.x += (tx - r.x) / dd * sp * dt; r.y += (ty - r.y) / dd * sp * dt; r.face = tx > r.x ? 1 : -1; }
+      else { r.state = 'eat'; }
+    } else if (r.state === 'eat') {
+      if (!r.target || r.target.state !== 'sprout') { r.state = 'seek'; continue; }
+      r.target.nibble += dt;
+      if (r.target.nibble > 2.6) { r.target.state = 'empty'; r.target.nibble = 0; burst(r.target.x, r.target.y, '#5db85b', 10); SFX.wither(); r.state = 'flee'; }
+    } else {
+      const dd = Math.max(1, dist(r.x, r.y, p.x, p.y));
+      let ax = (r.x - p.x) / dd, ay = (r.y - p.y) / dd;
+      if (dd > 200) { ax = r.x < W / 2 ? -1 : 1; ay = 0; }
+      r.x += ax * 190 * dt; r.y += ay * 190 * dt; r.face = ax > 0 ? 1 : -1;
+      if (r.x < -30 || r.x > W + 30 || r.y < -30 || r.y > H + 30) g.rabbits.splice(i, 1);
+    }
+  }
+}
+function updateSummer(dt, d, ys) {
+  const p = g.player;
+  const pulse = 0.8 + 0.35 * Math.sin(g.t * 0.6);
+  p.inShade = inShade(p.x, p.y) || inPond(p.x, p.y);
+  if (!p.inShade) { p.hp -= 2.6 * d.heat * ys * pulse * dt; p.drain = 'heat'; if (p.hp <= 0) g.cause = 'heat'; }
+  else p.hp += 0.6 * dt;
+  g.plots.forEach(pl => {
+    if (pl.state === 'sprout') {
+      pl.growth = Math.min(1, pl.growth + dt / 25);
+      pl.thirst -= dt / (13.5 / Math.sqrt(ys)) * d.heat;
+      if (pl.thirst <= 0) { pl.state = 'dead'; SFX.wither(); burst(pl.x, pl.y, '#b59a52', 10); }
+    }
+  });
+  spawnTwigs(dt);
+}
+function updateFall(dt, d, ys) {
+  const w = g.wind;
+  w.timer -= dt;
+  if (w.timer <= 0) { w.timer = rand(5, 8); w.ta = rand(0, Math.PI * 2); w.ts = rand(0.35, 1) * Math.min(1.4, ys); }
+  w.a += Math.atan2(Math.sin(w.ta - w.a), Math.cos(w.ta - w.a)) * Math.min(1, dt * 0.8);
+  w.s = lerp(w.s, w.ts * (0.7 + 0.3 * Math.sin(g.t * 2.3)), Math.min(1, dt * 1.5));
+  w.x = Math.cos(w.a) * w.s; w.y = Math.sin(w.a) * w.s;
+  g.plots.forEach(pl => {
+    if (pl.state !== 'tree') return;
+    pl.fruitT -= dt;
+    if (pl.fruitT <= 0) {
+      pl.fruitT = (pl.age >= 1 ? 7.5 : 14) / d.fruit * rand(0.8, 1.25) * (pl.elder ? 0.8 : 1);
+      const it = makeItem('fruit', pl.x + rand(-26, 26), pl.y + rand(-4, 14), 34); g.items.push(it);
+    }
+    pl.branchT -= dt;
+    if (pl.branchT <= 0) { pl.branchT = rand(16, 24); g.items.push(makeItem('wood', pl.x + rand(-30, 30), pl.y + rand(4, 20), 30)); }
+    if (pl.seedsLeft > 0 && g.t > pl.seedT) { pl.seedsLeft--; pl.seedT = g.t + rand(6, 12); g.items.push(makeItem('seed', pl.x + rand(-22, 22), pl.y + rand(-2, 16), 38)); }
+  });
+  // a little dusk at the end of fall
+  if (Math.random() < dt * 0.3) spawnTwigs(0, true);
+}
+function updateWinter(dt, d, ys) {
+  const p = g.player;
+  g.fuel = Math.max(0, g.fuel - 3.4 * d.burn * ys * dt);
+  if (g.fuel === 0 && !g.outPlayed) { g.outPlayed = true; SFX.out(); }
+  if (g.fuel > 0) g.outPlayed = false;
+  const lr = lightRadius();
+  p.warm = g.fuel > 0 && dist(p.x, p.y, HEARTH.x, HEARTH.y) < lr * 0.85;
+  p.hp -= 1.0 * d.hunger * ys * dt; p.drain = 'hunger';
+  if (p.hp <= 0) g.cause = 'hunger';
+  if (!p.warm) { p.hp -= 3.6 * d.cold * ys * dt; p.drain = 'cold'; if (p.hp <= 0) g.cause = 'cold'; }
+  // thaw warning: cracks under your feet near the end of winter
+  if (p.onIce && g.len - g.t < 5) { g.crackT -= dt; if (g.crackT <= 0) { g.crackT = 0.7; SFX.crack(); } }
+  // deadwood appears out in the dark
+  g.spawn.wood -= dt;
+  if (g.spawn.wood <= 0) {
+    g.spawn.wood = rand(7, 10) * Math.sqrt(ys);
+    if (g.items.filter(i => i.type === 'wood').length < 5) {
+      for (let k = 0; k < 20; k++) {
+        const x = rand(PLAY.x0 + 20, PLAY.x1 - 20), y = rand(PLAY.y0 + 20, PLAY.y1 - 20);
+        if (dist(x, y, HEARTH.x, HEARTH.y) > 230 && !inPondShape(x, y, 1) && !blocked(x, y, 14)) { g.items.push(makeItem('wood', x, y)); break; }
+      }
+    }
+  }
+  // wolves
+  g.spawn.wolf -= dt;
+  if (g.spawn.wolf <= 0) {
+    g.spawn.wolf = (g.year === 1 ? 13 : 9) / (d.wolves * ys) * rand(0.8, 1.2);
+    if (g.wolves.length < 1 + g.year && g.len - g.t > 6) { const e = edgePoint(); g.wolves.push({ x: e.x, y: e.y, state: 'hunt', t: 0, life: rand(16, 22), rt: 0, face: 1, step: 0, ex: e.x, ey: e.y }); SFX.howl(); }
+  }
+}
+function updateWolves(dt) {
+  const p = g.player, ys = yearScale(), lr = lightRadius();
+  if (g.season !== 3) g.wolves.forEach(w => w.state = 'leave');
+  for (let i = g.wolves.length - 1; i >= 0; i--) {
+    const w = g.wolves[i]; w.t += dt; w.life -= dt; w.step += dt * 9;
+    const dh = dist(w.x, w.y, HEARTH.x, HEARTH.y);
+    let vx = 0, vy = 0;
+    if (w.state === 'hunt') {
+      if (!p.warm) { const dd = Math.max(1, dist(w.x, w.y, p.x, p.y)); const sp = 86 * (0.9 + 0.1 * ys); vx = (p.x - w.x) / dd * sp; vy = (p.y - w.y) / dd * sp; }
+      else { const a = Math.atan2(w.y - HEARTH.y, w.x - HEARTH.x) + 0.6 * dt; const R = lr + 40; vx = (HEARTH.x + Math.cos(a) * R - w.x) * 1.5; vy = (HEARTH.y + Math.sin(a) * R - w.y) * 1.5; }
+      if (w.life <= 0) w.state = 'leave';
+      if (dist(w.x, w.y, p.x, p.y) < 24 && p.hurtT <= 0) {
+        hurt(13 * Math.sqrt(ys), 'wolves');
+        const dd = Math.max(1, dist(w.x, w.y, p.x, p.y)); p.x += (p.x - w.x) / dd * 26; p.y += (p.y - w.y) / dd * 26; collide(p, 11);
+        w.state = 'retreat'; w.rt = 2.2;
+      }
+    } else if (w.state === 'retreat') {
+      const dd = Math.max(1, dist(w.x, w.y, p.x, p.y)); vx = (w.x - p.x) / dd * 110; vy = (w.y - p.y) / dd * 110;
+      w.rt -= dt; if (w.rt <= 0) w.state = w.life > 0 ? 'hunt' : 'leave';
+    } else {
+      const dd = Math.max(1, dist(w.x, w.y, w.ex, w.ey)); vx = (w.ex - w.x) / dd * 120; vy = (w.ey - w.y) / dd * 120;
+      if (dd < 10) { g.wolves.splice(i, 1); continue; }
+    }
+    // the fire keeps wolves at bay
+    if (g.fuel > 0 && dh < lr * 0.95) { const k = (lr * 0.95 - dh); vx += (w.x - HEARTH.x) / Math.max(1, dh) * k * 4; vy += (w.y - HEARTH.y) / Math.max(1, dh) * k * 4; if (w.state === 'hunt' && k > 20) { w.state = 'retreat'; w.rt = 1.5; g.stats.wolves++; } }
+    w.x += vx * dt; w.y += vy * dt; if (Math.abs(vx) > 5) w.face = vx > 0 ? 1 : -1;
+  }
+}
+function spawnTwigs(dt, force) {
+  g.spawn.twig -= dt;
+  if (force || g.spawn.twig <= 0) {
+    g.spawn.twig = rand(18, 26);
+    if (g.items.filter(i => i.type === 'wood').length < 2) {
+      for (let k = 0; k < 20; k++) {
+        const x = rand(PLAY.x0 + 30, PLAY.x1 - 30), y = rand(PLAY.y0 + 30, PLAY.y1 - 20);
+        if (!inPondShape(x, y, 1.05) && !blocked(x, y, 16)) { g.items.push(makeItem('wood', x, y, 20)); break; }
+      }
+    }
+  }
+}
+function updateDemo(dt) {
+  g.t += dt; g.banner = 0;
+  if (g.t > 5) { g.t = 0; g.prevSeason = g.season; g.season = (g.season + 1) % 4; setAmbience(g.season); }
+  g.len = 5;
+  if (g.season === 2) { g.wind.a += dt * 0.3; g.wind.s = 0.6; g.wind.x = Math.cos(g.wind.a) * 0.6; g.wind.y = Math.sin(g.wind.a) * 0.3; }
+  g.pond = g.season === 1 ? lerp(g.pond, 0.6, dt) : lerp(g.pond, 1, dt * 0.5);
+  g.fuel = 100;
+  updateParts(dt);
+}
+function edgePoint() {
+  const side = (Math.random() * 4) | 0;
+  if (side === 0) return { x: rand(60, 900), y: -20 };
+  if (side === 1) return { x: rand(60, 900), y: H + 20 };
+  if (side === 2) return { x: -20, y: rand(90, 500) };
+  return { x: W + 20, y: rand(90, 500) };
+}
+function inShade(x, y) {
+  if (x > PORCH.x0 && x < PORCH.x1 && y > PORCH.y0 - 4 && y < PORCH.y1) return true;
+  return g.plots.some(pl => pl.state === 'tree' && dist(x, y, pl.x + 6, pl.y + 8) < (pl.elder ? 62 : 30 + 16 * Math.min(1, pl.age + 0.5)));
+}
+function blocked(x, y, r) {
+  if (x > CABIN.x0 - r && x < CABIN.x1 + r && y > CABIN.y0 - r && y < CABIN.y1 + r) return true;
+  if (dist(x, y, HEARTH.x, HEARTH.y) < 26 + r) return true;
+  return g.plots.some(pl => (pl.state === 'tree' || pl.state === 'stump') && dist(x, y, pl.x, pl.y) < 12 + r);
+}
+function collide(o, r) {
+  o.x = clamp(o.x, PLAY.x0 + r, PLAY.x1 - r); o.y = clamp(o.y, PLAY.y0 + r, PLAY.y1 - r);
+  // cabin box
+  if (o.x > CABIN.x0 - r && o.x < CABIN.x1 + r && o.y > CABIN.y0 - r && o.y < CABIN.y1 + r * 0.4) {
+    const dl = o.x - (CABIN.x0 - r), dr = CABIN.x1 + r - o.x, dt = o.y - (CABIN.y0 - r), db = CABIN.y1 + r * 0.4 - o.y;
+    const m = Math.min(dl, dr, dt, db);
+    if (m === dl) o.x = CABIN.x0 - r; else if (m === dr) o.x = CABIN.x1 + r; else if (m === dt) o.y = CABIN.y0 - r; else o.y = CABIN.y1 + r * 0.4;
+  }
+  const circ = (cx, cy, cr) => { const dd = dist(o.x, o.y, cx, cy); if (dd < cr + r && dd > 0.01) { o.x = cx + (o.x - cx) / dd * (cr + r); o.y = cy + (o.y - cy) / dd * (cr + r); } };
+  circ(HEARTH.x, HEARTH.y, 16);
+  g.plots.forEach(pl => { if (pl.state === 'tree') circ(pl.x, pl.y, pl.elder ? 13 : 9); else if (pl.state === 'stump') circ(pl.x, pl.y, 9); });
+}
+
+// ---------------------------------------------------------------- actions
+function bestAction() {
+  const p = g.player, s = g.season;
+  const near = (x, y, r) => dist(p.x, p.y, x, y) < r;
+  if (p.wood > 0 && g.fuel < 96 && near(HEARTH.x, HEARTH.y, 58)) return { type: 'feed', x: HEARTH.x, y: HEARTH.y - 26, icon: 'fire' };
+  let target = null, bd = 40;
+  if (s === 1 && p.bucket > 0) g.plots.forEach(pl => { if (pl.state === 'sprout' && pl.thirst < 0.93) { const dd = dist(p.x, p.y, pl.x, pl.y); if (dd < bd) { bd = dd; target = pl; } } });
+  if (target) return { type: 'water', plot: target, x: target.x, y: target.y - 26, icon: 'drop' };
+  bd = 36;
+  if (p.seeds > 0) g.plots.forEach(pl => { if (pl.state === 'empty') { const dd = dist(p.x, p.y, pl.x, pl.y); if (dd < bd) { bd = dd; target = pl; } } });
+  if (target) return s === 0 ? { type: 'plant', plot: target, x: target.x, y: target.y - 22, icon: 'sprout' } : { type: 'noplant', plot: target, x: target.x, y: target.y - 22, icon: 'sprout', no: true };
+  if (s !== 3 && p.bucket < 3 && inPondShape(p.x, p.y, g.pond + 0.3)) return { type: 'fill', x: p.x, y: p.y - 30, icon: 'bucket' };
+  bd = 38;
+  g.plots.forEach(pl => { if ((pl.state === 'tree' || pl.state === 'dead') && !pl.elder) { const dd = dist(p.x, p.y, pl.x, pl.y); if (dd < bd) { bd = dd; target = pl; } } });
+  if (target) return { type: 'chop', plot: target, x: target.x, y: target.y - (target.state === 'tree' ? 70 : 24), icon: 'axe' };
+  return null;
+}
+function doAction() {
+  const p = g.player, a = bestAction();
+  if (!a) { SFX.deny(); return; }
+  if (a.type === 'feed') { p.wood--; g.fuel = Math.min(100, g.fuel + 22); SFX.fire(); burst(HEARTH.x, HEARTH.y - 8, '#ffb347', 14); floatText(HEARTH.x, HEARTH.y - 30, 'fire', '+'); }
+  else if (a.type === 'water') { p.bucket--; a.plot.thirst = 1; SFX.water(); burst(a.plot.x, a.plot.y - 6, PAL[1].water2, 12); }
+  else if (a.type === 'plant') { p.seeds--; a.plot.state = 'sprout'; a.plot.growth = 0; a.plot.thirst = 1; a.plot.nibble = 0; g.stats.planted++; SFX.plant(); burst(a.plot.x, a.plot.y, '#7a5235', 10); }
+  else if (a.type === 'noplant') { SFX.deny(); floatText(a.plot.x, a.plot.y - 18, ['sprout', 'sun', 'leaf', 'snow'][g.season], '✕'); }
+  else if (a.type === 'fill') { p.bucket = 3; SFX.fill(); burst(p.x, p.y, PAL[1].water2, 14); }
+  else if (a.type === 'chop') {
+    if (p.chopCD > 0) return;
+    p.chopCD = 0.32; const pl = a.plot; pl.shake = 1; pl.hits++; SFX.chop();
+    if (!settings.reduceMotion) g.shake = Math.max(g.shake, 2.5);
+    burst(pl.x, pl.y - 10, PAL[g.season].trunk, 5);
+    if (pl.state === 'dead') { pl.state = 'empty'; pl.hits = 0; g.items.push(makeItem('wood', pl.x + 10, pl.y + 6, 10)); }
+    else if (pl.hits >= 3) {
+      const n = pl.age >= 1 ? 3 : 2;
+      pl.state = 'stump'; pl.hits = 0; SFX.fell(); burst(pl.x, pl.y - 40, PAL[g.season].leaf, 26);
+      for (let i = 0; i < n; i++) { const it = makeItem('wood', pl.x + rand(-26, 26), pl.y + rand(8, 26), 26); it.vz = 80; g.items.push(it); }
+    }
+  }
+}
+function eat() {
+  const p = g.player;
+  if (p.fruit <= 0 || p.hp >= 99) { SFX.deny(); return; }
+  p.fruit--; p.hp = Math.min(100, p.hp + 20); SFX.eat(); burst(p.x, p.y - 14, UIC().fruit, 8); floatText(p.x, p.y - 30, 'heart', '+');
+}
+
+// ---------------------------------------------------------------- particles
+function burst(x, y, col, n) {
+  if (settings.reduceMotion) n = Math.ceil(n / 3);
+  for (let i = 0; i < n; i++) { const a = rand(0, 6.28), s = rand(30, 120); g.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 40, life: rand(0.4, 0.8), max: 0.8, col, r: rand(1.5, 3.5) }); }
+}
+function floatText(x, y, icon, txt) { g.floats.push({ x, y, icon, txt, t: 0 }); }
+function updateParts(dt) {
+  for (let i = g.parts.length - 1; i >= 0; i--) { const q = g.parts[i]; q.life -= dt; q.vy += 160 * dt; q.x += q.vx * dt; q.y += q.vy * dt; if (q.life <= 0) g.parts.splice(i, 1); }
+  for (let i = g.floats.length - 1; i >= 0; i--) { const f = g.floats[i]; f.t += dt; f.y -= 24 * dt; if (f.t > 1.1) g.floats.splice(i, 1); }
+  const s = g.season, n = settings.reduceMotion ? 60 : g.weather.length;
+  for (let i = 0; i < n; i++) {
+    const q = g.weather[i];
+    if (s === 0) { q.x += -60 * dt; q.y += 520 * q.s * dt; }
+    else if (s === 1) { q.y -= 14 * q.s * dt; q.x += Math.sin(time + q.r) * 8 * dt; }
+    else if (s === 2) { q.x += (g.wind.x * 220 + 20) * q.s * dt; q.y += (g.wind.y * 220 + 40) * q.s * dt; q.r += dt * 3; }
+    else { q.x += (Math.sin(time * 0.7 + q.r) * 30 - 20) * dt; q.y += 60 * q.s * dt; }
+    if (q.y > H + 10) { q.y = -10; q.x = rand(0, W + 80); } if (q.y < -10) q.y = H + 10;
+    if (q.x < -20) q.x = W + 10; if (q.x > W + 20) q.x = -10;
+  }
+}
+
+// =====================================================================
+// DRAWING
+// =====================================================================
+let P = null; // the current blended palette
+function blendedPalette() {
+  const k = g.demo ? clamp(g.t / 1.6, 0, 1) : clamp(g.t / 3, 0, 1);
+  const a = PAL[g.prevSeason], b = PAL[g.season], out = {};
+  for (const key in b) out[key] = k >= 1 ? b[key] : mixHex(a[key], b[key], k);
+  out.k = k; return out;
+}
+function seasonWeight(s) { // how much of season s is showing (for blended decorations)
+  const k = g.demo ? clamp(g.t / 1.6, 0, 1) : clamp(g.t / 3, 0, 1);
+  return (g.season === s ? k : 0) + (g.prevSeason === s ? 1 - k : 0);
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function circle(x, y, r, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill(); }
+function ellipse(x, y, rx, ry, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, 6.2832); ctx.fill(); }
+
+function drawWorld() {
+  P = blendedPalette();
+  // ground
+  ctx.fillStyle = P.ground; ctx.fillRect(0, 0, W, H);
+  // paths
+  ctx.strokeStyle = rgbaStr(P.dirt, 0.45); ctx.lineCap = 'round'; ctx.lineWidth = 26;
+  ctx.beginPath(); ctx.moveTo(HEARTH.x, HEARTH.y + 10); ctx.quadraticCurveTo(380, 430, POND.x + 90, POND.y + 20); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(HEARTH.x + 20, HEARTH.y); ctx.quadraticCurveTo(580, 330, 700, 330); ctx.lineTo(880, 330); ctx.stroke();
+  ctx.lineWidth = 18; ctx.beginPath(); ctx.moveTo(HEARTH.x, HEARTH.y + 10); ctx.lineTo(480, 530); ctx.stroke();
+  // ground tufts, flowers, leaves, snow sparkles
+  const wSpring = seasonWeight(0), wFall = seasonWeight(2), wWinter = seasonWeight(3);
+  for (const t of deco) {
+    if (t.k < 0.62) {
+      ctx.strokeStyle = P.ground2; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(t.x - 4, t.y - 5); ctx.lineTo(t.x, t.y); ctx.lineTo(t.x + 4, t.y - 6); ctx.moveTo(t.x, t.y); ctx.lineTo(t.x, t.y - 7); ctx.stroke();
+    } else if (t.k < 0.82) {
+      if (wSpring > 0.01) { ctx.globalAlpha = wSpring; circle(t.x, t.y, 3, t.k < 0.72 ? PAL[0].accent : PAL[0].accent2); circle(t.x, t.y, 1.2, '#ffffff'); ctx.globalAlpha = 1; }
+      if (wFall > 0.01) { ctx.globalAlpha = wFall; ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.r); ellipse(0, 0, 5, 2.6, t.k < 0.72 ? PAL[2].leaf : PAL[2].accent); ctx.restore(); ctx.globalAlpha = 1; }
+    } else if (wWinter > 0.01) { ctx.globalAlpha = wWinter * 0.9; ellipse(t.x, t.y, 9, 3.5, '#ffffff'); ctx.globalAlpha = 1; }
+  }
+  drawPond();
+  // soil plots
+  g.plots.forEach(pl => {
+    if (pl.elder) return;
+    ellipse(pl.x, pl.y + 2, 19, 9, rgbaStr(P.dirt, pl.state === 'empty' ? 0.85 : 0.6));
+    if (pl.state === 'empty') { ctx.strokeStyle = rgbaStr(P.trunk, 0.35); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(pl.x - 10, pl.y); ctx.lineTo(pl.x + 10, pl.y); ctx.moveTo(pl.x - 7, pl.y + 5); ctx.lineTo(pl.x + 7, pl.y + 5); ctx.stroke(); }
+  });
+  // summer shade pools
+  const wSummer = seasonWeight(1);
+  if (wSummer > 0.01) {
+    ctx.globalAlpha = 0.22 * wSummer;
+    g.plots.forEach(pl => { if (pl.state === 'tree') { const r = pl.elder ? 62 : 30 + 16 * Math.min(1, pl.age + 0.5); ellipse(pl.x + 6, pl.y + 8, r, r * 0.72, '#1f3a1a'); } });
+    ctx.fillStyle = '#1f3a1a'; ctx.fillRect(PORCH.x0, PORCH.y0, PORCH.x1 - PORCH.x0, PORCH.y1 - PORCH.y0);
+    ctx.globalAlpha = 1;
+  }
+  // items on the ground (shadows first)
+  g.items.forEach(it => { ellipse(it.x, it.y + 3, 6, 2.5, 'rgba(0,0,0,0.18)'); });
+  // y-sorted drawables
+  const list = [];
+  list.push({ y: CABIN.y1, f: drawCabin });
+  list.push({ y: HEARTH.y + 8, f: drawHearth });
+  g.plots.forEach(pl => { if (pl.state !== 'empty') list.push({ y: pl.y + 2, f: () => drawPlant(pl) }); });
+  g.items.forEach(it => list.push({ y: it.y, f: () => drawIcon(it.type, it.x, it.y - 6 - it.z, 15, it) }));
+  g.rabbits.forEach(r => list.push({ y: r.y, f: () => drawRabbit(r) }));
+  g.wolves.forEach(w => list.push({ y: w.y, f: () => drawWolf(w) }));
+  if (!g.demo) list.push({ y: g.player.y, f: drawPlayer });
+  list.sort((a, b) => a.y - b.y).forEach(o => o.f());
+  // particles
+  g.parts.forEach(q => { ctx.globalAlpha = clamp(q.life / 0.5, 0, 1); circle(q.x, q.y, q.r, q.col); });
+  ctx.globalAlpha = 1;
+  drawBorder();
+  drawWeather();
+  drawLighting();
+}
+function rgbaStr(c, a) { if (c[0] === '#') return rgba(c, a); return c.replace('rgb(', 'rgba(').replace(')', ',' + a + ')'); }
+
+function drawPond() {
+  const s = g.season, k = g.pond;
+  const frozen = s === 3 || (s === 0 && g.t < 1.5 && !g.demo);
+  ellipse(POND.x, POND.y + 4, POND.rx * Math.max(k, 0.42) + 8, POND.ry * Math.max(k, 0.42) + 6, rgbaStr(P.dirt, 0.6));
+  ellipse(POND.x, POND.y, POND.rx * k, POND.ry * k, frozen ? '#bfe2f0' : P.water);
+  ctx.save(); ctx.beginPath(); ctx.ellipse(POND.x, POND.y, POND.rx * k, POND.ry * k, 0, 0, 6.2832); ctx.clip();
+  if (frozen) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(POND.x - 70 + i * 40, POND.y - 30); ctx.lineTo(POND.x - 40 + i * 40, POND.y - 10); ctx.stroke(); }
+    if (!g.demo && g.len - g.t < 5 && s === 3) {
+      ctx.strokeStyle = '#4a7a95'; ctx.lineWidth = 1.5; const n = Math.floor((5 - (g.len - g.t)) * 3);
+      for (let i = 0; i < n; i++) { const a = i * 2.39; ctx.beginPath(); ctx.moveTo(POND.x + Math.cos(a) * 10, POND.y + Math.sin(a) * 6); ctx.lineTo(POND.x + Math.cos(a + 0.3) * 50, POND.y + Math.sin(a + 0.2) * 34); ctx.lineTo(POND.x + Math.cos(a - 0.1) * 90, POND.y + Math.sin(a) * 60); ctx.stroke(); }
+    }
+  } else {
+    ctx.strokeStyle = P.water2; ctx.lineWidth = 2;
+    for (let i = 0; i < 5; i++) { const y = POND.y - 40 + i * 20, x = POND.x - 60 + Math.sin(time * 0.8 + i) * 20; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 26, y); ctx.stroke(); }
+    if (s === 0) for (let i = 0; i < 6; i++) { const ph = (time * 0.9 + i * 0.37) % 1; ctx.strokeStyle = 'rgba(255,255,255,' + (0.6 * (1 - ph)) + ')'; ctx.beginPath(); ctx.ellipse(POND.x - 70 + i * 28, POND.y - 20 + (i % 3) * 22, 3 + ph * 10, 1.5 + ph * 4, 0, 0, 6.28); ctx.stroke(); }
+  }
+  ctx.restore();
+  // reeds
+  for (let i = 0; i < 7; i++) { const a = 2.4 + i * 0.22, x = POND.x + Math.cos(a) * POND.rx, y = POND.y + Math.sin(a) * POND.ry; ctx.strokeStyle = s === 3 ? '#8a9aa6' : P.border; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 3, y - 18 - (i % 3) * 5); ctx.stroke(); }
+}
+function drawCabin() {
+  const x0 = CABIN.x0, x1 = CABIN.x1, y0 = CABIN.y0, y1 = CABIN.y1;
+  ellipse((x0 + x1) / 2, y1 + 2, 70, 10, 'rgba(0,0,0,0.15)');
+  ctx.fillStyle = '#b07a4a'; ctx.fillRect(x0 + 6, y0 + 26, x1 - x0 - 12, y1 - y0 - 26);
+  ctx.strokeStyle = '#8c5e36'; ctx.lineWidth = 2;
+  for (let y = y0 + 34; y < y1; y += 9) { ctx.beginPath(); ctx.moveTo(x0 + 6, y); ctx.lineTo(x1 - 6, y); ctx.stroke(); }
+  ctx.fillStyle = '#5a3a24'; rr(470, y1 - 30, 20, 30, 3); ctx.fill();
+  const lit = g.season === 3 || g.season === 2;
+  ctx.fillStyle = lit ? '#ffd27a' : '#6fa9c4'; rr(436, y0 + 40, 18, 15, 2); ctx.fill(); rr(506, y0 + 40, 18, 15, 2); ctx.fill();
+  ctx.fillStyle = P.roof; ctx.beginPath(); ctx.moveTo(x0 - 8, y0 + 32); ctx.lineTo(480, y0 - 14); ctx.lineTo(x1 + 8, y0 + 32); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.beginPath(); ctx.moveTo(480, y0 - 14); ctx.lineTo(x1 + 8, y0 + 32); ctx.lineTo(480, y0 + 32); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#7a5235'; ctx.fillRect(510, y0 - 6, 12, 20);
+  // porch roof
+  ctx.fillStyle = rgbaStr(P.roof, 0.9); ctx.fillRect(PORCH.x0 + 4, y1 - 4, PORCH.x1 - PORCH.x0 - 8, 7);
+  ctx.fillStyle = '#7a5235'; ctx.fillRect(PORCH.x0 + 8, y1, 4, 30); ctx.fillRect(PORCH.x1 - 12, y1, 4, 30);
+  // chimney smoke
+  if (g.fuel > 0) for (let i = 0; i < 4; i++) { const ph = (time * 0.4 + i / 4) % 1; circle(516 + Math.sin(ph * 6 + i) * 6 + (g.season === 2 ? g.wind.x * ph * 40 : 0), y0 - 10 - ph * 50, 4 + ph * 7, 'rgba(230,230,235,' + (0.5 * (1 - ph)) + ')'); }
+}
+function drawHearth() {
+  const x = HEARTH.x, y = HEARTH.y;
+  for (let i = 0; i < 9; i++) { const a = i / 9 * 6.283; ellipse(x + Math.cos(a) * 17, y + Math.sin(a) * 9, 6, 4.5, i % 2 ? '#8b8f96' : '#a3a8ae'); }
+  ellipse(x, y, 12, 6, '#3a2a20');
+  if (g.fuel > 0) {
+    const f = 0.5 + 0.5 * Math.sqrt(g.fuel / 100), fl = settings.reduceMotion ? 1 : 0.85 + 0.15 * Math.sin(time * 18);
+    ctx.fillStyle = '#ff7a2a'; ctx.beginPath(); ctx.moveTo(x - 11 * f, y); ctx.quadraticCurveTo(x - 8, y - 22 * f * fl, x, y - 30 * f * fl); ctx.quadraticCurveTo(x + 8, y - 22 * f * fl, x + 11 * f, y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd24a'; ctx.beginPath(); ctx.moveTo(x - 6 * f, y); ctx.quadraticCurveTo(x - 4, y - 12 * f, x, y - 18 * f * fl); ctx.quadraticCurveTo(x + 4, y - 12 * f, x + 6 * f, y); ctx.closePath(); ctx.fill();
+  } else { ctx.strokeStyle = '#555'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - 8, y - 2); ctx.lineTo(x + 8, y + 2); ctx.moveTo(x - 8, y + 2); ctx.lineTo(x + 8, y - 2); ctx.stroke(); }
+  // fuel gauge
+  if (!g.demo && (g.season >= 2 || g.fuel < 100)) {
+    const w = 46; ctx.fillStyle = 'rgba(20,20,25,0.55)'; rr(x - w / 2, y + 16, w, 7, 3.5); ctx.fill();
+    ctx.fillStyle = g.fuel < 25 && Math.sin(time * 8) > 0 ? UIC().danger : UIC().fuel; rr(x - w / 2 + 1, y + 17, (w - 2) * g.fuel / 100, 5, 2.5); ctx.fill();
+  }
+}
+function drawPlant(pl) {
+  const s = g.season, x = pl.x + (pl.shake ? Math.sin(time * 60) * 3 * pl.shake : 0), y = pl.y;
+  if (pl.state === 'sprout') {
+    const k = 0.5 + pl.growth * 0.7, dry = s === 1 ? 1 - pl.thirst : 0;
+    const col = dry > 0.6 ? '#b5a24e' : P.leaf === PAL[3].leaf ? '#5db85b' : '#5db85b';
+    ctx.strokeStyle = '#3d8a3f'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 14 * k); ctx.stroke();
+    ctx.save(); ctx.translate(x, y - 14 * k);
+    ctx.rotate(-0.5 - dry * 0.8); ellipse(-6 * k, 0, 7 * k, 3.5 * k, col); ctx.rotate(1 + dry * 1.6); ellipse(6 * k, 0, 7 * k, 3.5 * k, col);
+    ctx.restore();
+    if (s === 1 && pl.thirst < 0.45) drawIcon('drop', x + 12, y - 26 + Math.sin(time * 6) * 2, 12, { warn: pl.thirst < 0.25 });
+    if (pl.nibble > 0) { ctx.strokeStyle = UIC().danger; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y - 8, 14, -1.57, -1.57 + 6.28 * pl.nibble / 2.6); ctx.stroke(); }
+  } else if (pl.state === 'dead') {
+    ctx.strokeStyle = '#8a6d3b'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 2, y - 12); ctx.lineTo(x + 8, y - 16); ctx.moveTo(x + 2, y - 10); ctx.lineTo(x - 5, y - 15); ctx.stroke();
+  } else if (pl.state === 'stump') {
+    ellipse(x, y + 1, 10, 5, '#6b4a2e'); ellipse(x, y - 3, 9, 4.5, '#c9a27a'); ctx.strokeStyle = '#8a6440'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y - 3, 5, 2.4, 0, 0, 6.28); ctx.stroke();
+  } else if (pl.state === 'tree') {
+    const sz = pl.elder ? 1.45 : 0.72 + 0.28 * Math.min(1, pl.age / 2 + 0.3) * (s === 2 && pl.age === 0 ? 1 : 1);
+    ellipse(x, y + 2, 16 * sz, 6 * sz, 'rgba(0,0,0,0.18)');
+    ctx.fillStyle = P.trunk; rr(x - 5 * sz, y - 30 * sz, 10 * sz, 32 * sz, 3); ctx.fill();
+    const cy = y - 44 * sz;
+    const wW = seasonWeight(3);
+    if (wW < 0.99) {
+      ctx.globalAlpha = 1 - wW;
+      circle(x - 14 * sz, cy + 6 * sz, 17 * sz, P.leaf2); circle(x + 14 * sz, cy + 6 * sz, 17 * sz, P.leaf2);
+      circle(x, cy - 6 * sz, 21 * sz, P.leaf); circle(x - 10 * sz, cy + 2 * sz, 15 * sz, P.leaf); circle(x + 11 * sz, cy, 14 * sz, P.leaf);
+      circle(x - 6 * sz, cy - 12 * sz, 7 * sz, 'rgba(255,255,255,0.18)');
+      const wS = seasonWeight(0);
+      if (wS > 0.01) { ctx.globalAlpha = (1 - wW) * wS; for (let i = 0; i < 7; i++) circle(x + Math.cos(i * 2.1) * 15 * sz, cy + Math.sin(i * 2.7) * 11 * sz, 2.6 * sz, PAL[0].accent); }
+      const wF = seasonWeight(2);
+      if (wF > 0.01 && pl.age >= 0) { ctx.globalAlpha = (1 - wW) * wF; for (let i = 0; i < (pl.age >= 1 ? 5 : 2); i++) { const fx = x + Math.cos(i * 1.7 + 0.5) * 13 * sz, fy = cy + Math.sin(i * 2.3) * 10 * sz + 4; circle(fx, fy, 3.6 * sz, UIC().fruit); circle(fx - 1, fy - 1, 1.2 * sz, UIC().fruitHi); } }
+      ctx.globalAlpha = 1;
+    }
+    if (wW > 0.01) {
+      ctx.globalAlpha = wW; ctx.strokeStyle = P.trunk; ctx.lineCap = 'round';
+      const br = (bx, by, a, l, w, d) => { if (d === 0) return; const ex = bx + Math.cos(a) * l, ey = by + Math.sin(a) * l; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke(); br(ex, ey, a - 0.5, l * 0.68, w * 0.65, d - 1); br(ex, ey, a + 0.45, l * 0.68, w * 0.65, d - 1); };
+      br(x, y - 28 * sz, -1.57, 16 * sz, 5 * sz, 4);
+      ellipse(x - 8 * sz, y - 50 * sz, 9 * sz, 3 * sz, '#ffffff'); ellipse(x + 9 * sz, y - 46 * sz, 7 * sz, 2.5 * sz, '#ffffff');
+      ctx.globalAlpha = 1;
+    }
+    if (pl.hits > 0) { for (let i = 0; i < 3; i++) circle(x - 8 + i * 8, y - 72 * sz, 2.5, i < pl.hits ? UIC().danger : 'rgba(255,255,255,0.6)'); }
+  }
+}
+function drawPlayer() {
+  const p = g.player, x = p.x, y = p.y;
+  const bob = settings.reduceMotion ? 0 : Math.abs(Math.sin(p.walk)) * 2.5;
+  if (p.hurtT > 0 && Math.sin(time * 40) > 0) ctx.globalAlpha = 0.5;
+  ellipse(x, y + 2, 11, 4.5, 'rgba(0,0,0,0.22)');
+  // feet
+  const st = Math.sin(p.walk) * 3;
+  ellipse(x - 4, y - 1 + st * 0.3, 3.5, 2.5, '#3a2a20'); ellipse(x + 4, y - 1 - st * 0.3, 3.5, 2.5, '#3a2a20');
+  // cloak body
+  ctx.fillStyle = '#3e5a8a'; ctx.beginPath(); ctx.moveTo(x - 11, y - 2 - bob); ctx.quadraticCurveTo(x, y - 34 - bob, x + 11, y - 2 - bob); ctx.closePath(); ctx.fill();
+  circle(x, y - 22 - bob, 9.5, '#3e5a8a');
+  circle(x + p.face * 2, y - 21 - bob, 6.5, '#f1c9a0');
+  circle(x + p.face * 4.5, y - 22 - bob, 1.3, '#2a1a12');
+  // scarf
+  ctx.fillStyle = '#f2a53a'; rr(x - 8, y - 16 - bob, 16, 4.5, 2); ctx.fill(); ctx.fillRect(x - p.face * 6 - 2, y - 14 - bob, 4, 8 + Math.sin(time * 6) * 1.5);
+  // winter hat
+  if (g.season === 3) { ctx.fillStyle = '#c94a3a'; ctx.beginPath(); ctx.arc(x, y - 26 - bob, 8, 3.14, 6.28); ctx.fill(); circle(x, y - 35 - bob, 3, '#ffffff'); }
+  // bucket
+  if (p.bucket > 0 || g.season === 1) {
+    const bx = x + p.face * 12, by = y - 8 - bob;
+    ctx.fillStyle = '#9aa3ad'; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by - 5); ctx.lineTo(bx + 4, by + 4); ctx.lineTo(bx - 4, by + 4); ctx.closePath(); ctx.fill();
+    if (p.bucket > 0) { ctx.fillStyle = PAL[1].water; ctx.fillRect(bx - 4.5, by - 4.5, 9, 3); }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawRabbit(r) {
+  const hop = r.state === 'eat' ? 0 : Math.max(0, Math.sin(r.hop)) * 5, x = r.x, y = r.y - hop;
+  ellipse(r.x, r.y + 2, 8, 3, 'rgba(0,0,0,0.18)');
+  ellipse(x, y - 6, 9, 6.5, '#b8a48c'); circle(x + r.face * 7, y - 10, 5, '#b8a48c');
+  ellipse(x + r.face * 6, y - 18, 2, 6, '#b8a48c'); ellipse(x + r.face * 9, y - 18, 2, 6, '#a8947c');
+  circle(x - r.face * 9, y - 7, 3, '#ffffff'); circle(x + r.face * 9, y - 11, 1.2, '#222');
+  if (r.state === 'eat') drawIcon('alert', x, y - 32 + Math.sin(time * 10) * 2, 14);
+}
+function drawWolf(w) {
+  const x = w.x, y = w.y, st = Math.sin(w.step) * 2, f = w.face;
+  ellipse(x, y + 2, 16, 4.5, 'rgba(0,0,0,0.25)');
+  ctx.strokeStyle = '#3f444c'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - 9, y - 6); ctx.lineTo(x - 9 + st, y + 1); ctx.moveTo(x + 9, y - 6); ctx.lineTo(x + 9 - st, y + 1); ctx.stroke();
+  ellipse(x, y - 10, 15, 7, '#5b616b');
+  ctx.fillStyle = '#5b616b'; ctx.beginPath(); ctx.moveTo(x - f * 14, y - 12); ctx.lineTo(x - f * 26, y - 16); ctx.lineTo(x - f * 14, y - 7); ctx.fill();
+  circle(x + f * 15, y - 15, 7, '#6b717b');
+  ctx.beginPath(); ctx.moveTo(x + f * 15, y - 15); ctx.lineTo(x + f * 26, y - 12); ctx.lineTo(x + f * 15, y - 10); ctx.fill();
+  ctx.fillStyle = '#4b5059'; ctx.beginPath(); ctx.moveTo(x + f * 11, y - 19); ctx.lineTo(x + f * 13, y - 28); ctx.lineTo(x + f * 17, y - 20); ctx.fill();
+}
+function drawWolfEyes() {
+  g.wolves.forEach(w => { const f = w.face; circle(w.x + f * 18, w.y - 17, 1.8, '#ffe14a'); circle(w.x + f * 14, w.y - 17, 1.8, '#ffe14a'); });
+}
+function drawBorder() {
+  const wW = seasonWeight(3);
+  for (const t of borderTrees) {
+    const s = t.s;
+    ctx.fillStyle = P.border2; ctx.beginPath(); ctx.moveTo(t.x - 16 * s, t.y); ctx.lineTo(t.x, t.y - 46 * s); ctx.lineTo(t.x + 16 * s, t.y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = P.border; ctx.beginPath(); ctx.moveTo(t.x - 12 * s, t.y - 14 * s); ctx.lineTo(t.x, t.y - 52 * s); ctx.lineTo(t.x + 12 * s, t.y - 14 * s); ctx.closePath(); ctx.fill();
+    if (wW > 0.01) { ctx.globalAlpha = wW; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(t.x - 6 * s, t.y - 36 * s); ctx.lineTo(t.x, t.y - 52 * s); ctx.lineTo(t.x + 6 * s, t.y - 36 * s); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1; }
+  }
+}
+function drawWeather() {
+  const s = g.season, n = settings.reduceMotion ? 60 : g.weather.length;
+  const fadeIn = g.demo ? clamp(g.t / 1.2, 0, 1) : clamp(g.t / 2, 0, 1);
+  ctx.globalAlpha = fadeIn;
+  if (s === 0) { ctx.strokeStyle = 'rgba(210,230,255,0.55)'; ctx.lineWidth = 1.3; ctx.beginPath(); for (let i = 0; i < n; i++) { const q = g.weather[i]; ctx.moveTo(q.x, q.y); ctx.lineTo(q.x - 4, q.y + 14 * q.s); } ctx.stroke(); }
+  else if (s === 1) { for (let i = 0; i < n; i += 4) { const q = g.weather[i]; circle(q.x, q.y, 1.4 * q.s, 'rgba(255,250,200,0.5)'); } }
+  else if (s === 2) { for (let i = 0; i < n; i += 2) { const q = g.weather[i]; ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.r); ellipse(0, 0, 4.5 * q.s, 2.2 * q.s, i % 4 ? PAL[2].leaf : PAL[2].accent); ctx.restore(); } }
+  else { for (let i = 0; i < n; i++) { const q = g.weather[i]; circle(q.x, q.y, 1.2 + q.s * 1.6, 'rgba(255,255,255,0.9)'); } }
+  ctx.globalAlpha = 1;
+}
+function darkness() {
+  const s = g.season, t = g.t, L = g.len;
+  if (s === 3) return 0.84;
+  if (s === 0) return g.demo ? 0 : 0.84 * clamp(1 - t / 3, 0, 1);
+  if (s === 2) return g.demo ? 0 : 0.4 * clamp((t - (L - 9)) / 9, 0, 1);
+  return 0;
+}
+function drawLighting() {
+  const dk = darkness();
+  if (dk > 0.01) {
+    fctx.globalCompositeOperation = 'source-over'; fctx.clearRect(0, 0, fog.width, fog.height);
+    fctx.fillStyle = 'rgba(10,16,38,' + dk + ')'; fctx.fillRect(0, 0, fog.width, fog.height);
+    fctx.globalCompositeOperation = 'destination-out';
+    const hole = (x, y, R, a) => { const r = R; const gr = fctx.createRadialGradient(x / 2, y / 2, 0, x / 2, y / 2, r / 2); gr.addColorStop(0, 'rgba(0,0,0,' + a + ')'); gr.addColorStop(0.6, 'rgba(0,0,0,' + a * 0.7 + ')'); gr.addColorStop(1, 'rgba(0,0,0,0)'); fctx.fillStyle = gr; fctx.fillRect(x / 2 - r / 2, y / 2 - r / 2, r, r); };
+    const fl = settings.reduceMotion ? 1 : 0.96 + 0.04 * Math.sin(time * 13);
+    if (g.fuel > 0) hole(HEARTH.x, HEARTH.y, lightRadius() * fl, 1);
+    if (!g.demo) hole(g.player.x, g.player.y - 10, 115, 0.95);
+    hole(480, 235, 46, 0.6);
+    g.items.forEach(it => { if (it.type === 'wood') hole(it.x, it.y, 30 + Math.sin(time * 3 + it.glint) * 5, 0.8); });
+    ctx.drawImage(fog, 0, 0, W, H);
+    if (g.fuel > 0) { ctx.globalCompositeOperation = 'lighter'; const gr = ctx.createRadialGradient(HEARTH.x, HEARTH.y, 0, HEARTH.x, HEARTH.y, lightRadius()); gr.addColorStop(0, 'rgba(255,140,40,' + 0.25 * dk + ')'); gr.addColorStop(1, 'rgba(255,140,40,0)'); ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over'; }
+    if (g.season === 3) drawWolfEyes();
+  }
+  // summer glare
+  const wS = seasonWeight(1);
+  if (wS > 0.01) {
+    const pulse = 0.5 + 0.5 * Math.sin(g.t * 0.6);
+    const gr = ctx.createRadialGradient(W * 0.75, -60, 40, W * 0.75, -60, 700);
+    gr.addColorStop(0, 'rgba(255,245,200,' + (0.35 + 0.15 * pulse) * wS + ')'); gr.addColorStop(1, 'rgba(255,200,120,' + 0.06 * wS + ')');
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  }
+  if (g.season === 0 && !g.demo) { ctx.fillStyle = 'rgba(60,80,110,0.08)'; ctx.fillRect(0, 0, W, H); }
+}
+
+// ---------------------------------------------------------------- icons
+function drawIcon(type, x, y, s, opt) {
+  opt = opt || {};
+  const k = s / 16;
+  ctx.save(); ctx.translate(x, y); ctx.scale(k, k);
+  if (opt.glow || (type === 'wood' && opt.t !== undefined && g && g.season === 3)) { circle(0, 0, 12, 'rgba(255,230,150,' + (0.25 + 0.15 * Math.sin(time * 4 + (opt.glint || 0))) + ')'); }
+  switch (type) {
+    case 'seed': ctx.fillStyle = '#8a5a2b'; ctx.beginPath(); ctx.moveTo(0, -8); ctx.quadraticCurveTo(7, 0, 0, 7); ctx.quadraticCurveTo(-7, 0, 0, -8); ctx.fill(); circle(-1.5, -1, 1.8, '#c9935a'); break;
+    case 'fruit': { const u = UIC(); circle(0, 1, 7, u.fruit); circle(-2.5, -1.5, 2.2, u.fruitHi); ctx.strokeStyle = '#5a3a24'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(1, -9); ctx.stroke(); ellipse(4, -8, 3.5, 1.8, '#4fa84a');
+      if (settings.colorblind) { ctx.strokeStyle = '#2a1a12'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(0, 1, 7, 0, 6.28); ctx.stroke(); } break; }
+    case 'wood': ctx.rotate(-0.35); ctx.fillStyle = '#7a5235'; rr(-9, -3.5, 18, 7, 3); ctx.fill(); ellipse(8, 0, 2.5, 3.5, '#c9a27a'); ctx.strokeStyle = '#5e3d27'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-5, -1); ctx.lineTo(3, -1); ctx.stroke(); break;
+    case 'drop': ctx.fillStyle = opt.warn && Math.sin(time * 10) > 0 ? UIC().danger : '#3fa9e0'; ctx.beginPath(); ctx.moveTo(0, -9); ctx.quadraticCurveTo(8, 2, 0, 8); ctx.quadraticCurveTo(-8, 2, 0, -9); ctx.fill(); circle(-2, 1, 1.8, 'rgba(255,255,255,0.7)'); break;
+    case 'bucket': ctx.fillStyle = '#9aa3ad'; ctx.beginPath(); ctx.moveTo(-7, -4); ctx.lineTo(7, -4); ctx.lineTo(5, 8); ctx.lineTo(-5, 8); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#3fa9e0'; ctx.fillRect(-6, -3, 12, 3); ctx.strokeStyle = '#6b737c'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, -4, 7, 3.14, 6.28); ctx.stroke(); break;
+    case 'sun': circle(0, 0, 5.5, '#ffc93a'); ctx.strokeStyle = '#ffb21f'; ctx.lineWidth = 2; for (let i = 0; i < 8; i++) { const a = i * 0.785; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 7.5, Math.sin(a) * 7.5); ctx.lineTo(Math.cos(a) * 10.5, Math.sin(a) * 10.5); ctx.stroke(); } break;
+    case 'shade': ellipse(0, 6, 9, 3, 'rgba(0,0,0,0.35)'); ctx.fillStyle = '#7a5235'; ctx.fillRect(-1.5, -1, 3, 7); circle(0, -4, 7, '#3f9c4a'); break;
+    case 'fire': ctx.fillStyle = '#ff7a2a'; ctx.beginPath(); ctx.moveTo(-7, 7); ctx.quadraticCurveTo(-7, -3, 0, -10); ctx.quadraticCurveTo(7, -3, 7, 7); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#ffd24a'; ctx.beginPath(); ctx.moveTo(-3.5, 7); ctx.quadraticCurveTo(-3, 0, 0, -3); ctx.quadraticCurveTo(3, 0, 3.5, 7); ctx.closePath(); ctx.fill(); break;
+    case 'heart': ctx.fillStyle = UIC().health; ctx.beginPath(); ctx.moveTo(0, 8); ctx.bezierCurveTo(-12, -1, -6, -10, 0, -4); ctx.bezierCurveTo(6, -10, 12, -1, 0, 8); ctx.fill(); break;
+    case 'axe': ctx.rotate(0.5); ctx.fillStyle = '#8a5a2b'; ctx.fillRect(-1.5, -9, 3, 18); ctx.fillStyle = '#b8c0c8'; ctx.beginPath(); ctx.moveTo(1, -9); ctx.quadraticCurveTo(10, -6, 9, 1); ctx.lineTo(1, -2); ctx.closePath(); ctx.fill(); break;
+    case 'rabbit': ellipse(0, 3, 7, 5, '#b8a48c'); circle(4, -1, 4, '#b8a48c'); ellipse(3, -8, 1.6, 4.5, '#b8a48c'); ellipse(6, -8, 1.6, 4.5, '#a8947c'); break;
+    case 'wolf': circle(0, 1, 7, '#6b717b'); ctx.fillStyle = '#4b5059'; ctx.beginPath(); ctx.moveTo(-6, -2); ctx.lineTo(-5, -10); ctx.lineTo(-1, -5); ctx.moveTo(6, -2); ctx.lineTo(5, -10); ctx.lineTo(1, -5); ctx.fill(); circle(-2.5, 0, 1.3, '#ffe14a'); circle(2.5, 0, 1.3, '#ffe14a'); break;
+    case 'snow': ctx.strokeStyle = '#bfe6ff'; ctx.lineWidth = 2; for (let i = 0; i < 3; i++) { const a = i * 1.047; ctx.beginPath(); ctx.moveTo(Math.cos(a) * -9, Math.sin(a) * -9); ctx.lineTo(Math.cos(a) * 9, Math.sin(a) * 9); ctx.stroke(); } break;
+    case 'leaf': ctx.rotate(-0.6); ellipse(0, 0, 9, 4.5, '#e8742d'); ctx.strokeStyle = '#a8461d'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(8, 0); ctx.stroke(); break;
+    case 'flower': for (let i = 0; i < 5; i++) { const a = i * 1.2566; circle(Math.cos(a) * 4.5, Math.sin(a) * 4.5, 3.5, '#f7a8c8'); } circle(0, 0, 3, '#fff1a1'); break;
+    case 'sprout': ctx.strokeStyle = '#3d8a3f'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(0, -2); ctx.stroke(); ellipse(-5, -4, 5.5, 2.8, '#5db85b'); ellipse(5, -4, 5.5, 2.8, '#5db85b'); ellipse(0, 8, 8, 2.5, '#8a6a48'); break;
+    case 'hunger': circle(0, 0, 7, '#d8c9a8'); ctx.fillStyle = '#5a3a24'; ctx.fillRect(-0.8, -10, 1.6, 4); ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.arc(7, 0, 4, 1.57, 4.71); ctx.fill(); ctx.beginPath(); ctx.arc(-7, 0, 4, -1.57, 1.57); ctx.fill(); break;
+    case 'alert': circle(0, 0, 8, UIC().danger); ctx.fillStyle = '#fff'; ctx.fillRect(-1.3, -5, 2.6, 6); ctx.fillRect(-1.3, 2.5, 2.6, 2.6); break;
+    case 'wind': ctx.strokeStyle = '#e9e2d0'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-9, -4); ctx.lineTo(4, -4); ctx.arc(4, -7, 3, 1.57, -1.2, true); ctx.moveTo(-9, 2); ctx.lineTo(7, 2); ctx.arc(7, 5, 3, -1.57, 1.2); ctx.stroke(); break;
+    case 'cross': ctx.strokeStyle = UIC().danger; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, 6); ctx.moveTo(6, -6); ctx.lineTo(-6, 6); ctx.stroke(); break;
+  }
+  ctx.restore();
+}
+function drawKey(x, y, label, h) {
+  h = h || 22;
+  ctx.font = 'bold ' + Math.round(h * 0.55) + 'px ui-rounded, "Trebuchet MS", system-ui, sans-serif';
+  const w = Math.max(h, ctx.measureText(label).width + 12);
+  ctx.fillStyle = '#b9b3a6'; rr(x - w / 2, y - h / 2 + 2, w, h, 5); ctx.fill();
+  ctx.fillStyle = '#f6f2e8'; rr(x - w / 2, y - h / 2, w, h - 2, 5); ctx.fill();
+  ctx.fillStyle = '#2b2620'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, x, y);
+  return w;
+}
+function primaryLabel(a) { if (lastInput === 'pad') return { action: 'A', eat: 'X', pause: 'Start' }[a] || '?'; if (touch.used) return ''; return keyLabel(settings.keys[a][0]); }
+
+// bubble: [key][icon] above a world target
+function drawBubble(x, y, parts, alpha) {
+  const bob = settings.reduceMotion ? 0 : Math.sin(time * 4) * 2.5;
+  y += bob;
+  ctx.font = 'bold 12px ui-rounded, "Trebuchet MS", system-ui, sans-serif';
+  const widths = parts.map(p => p.key !== undefined ? Math.max(22, ctx.measureText(p.key).width + 12) : p.text ? ctx.measureText(p.text).width + 2 : 20);
+  const w = widths.reduce((a, b) => a + b + 4, 8), h = 30;
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+  ctx.fillStyle = 'rgba(255,253,246,0.94)'; rr(x - w / 2, y - h, w, h, 9); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x - 6, y); ctx.lineTo(x, y + 7); ctx.lineTo(x + 6, y); ctx.fill();
+  let cx = x - w / 2 + 6;
+  parts.forEach((p, i) => {
+    const pw = widths[i];
+    if (p.key !== undefined) drawKey(cx + pw / 2, y - h / 2, p.key, 20);
+    else if (p.text) { ctx.fillStyle = '#2b2620'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(p.text, cx + pw / 2, y - h / 2); }
+    else { drawIcon(p.icon, cx + pw / 2, y - h / 2, 16); if (p.no) drawIcon('cross', cx + pw / 2, y - h / 2, 16); }
+    cx += pw + 4;
+  });
+  ctx.globalAlpha = 1;
+}
+function drawArrowTo(tx, ty) {
+  const p = g.player, d = dist(p.x, p.y, tx, ty); if (d < 70) return;
+  const a = Math.atan2(ty - p.y, tx - p.x), r = 34 + (settings.reduceMotion ? 0 : Math.sin(time * 6) * 3);
+  ctx.save(); ctx.translate(p.x + Math.cos(a) * r, p.y - 12 + Math.sin(a) * r); ctx.rotate(a);
+  ctx.fillStyle = 'rgba(255,253,246,0.95)'; ctx.strokeStyle = 'rgba(40,30,20,0.6)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -7); ctx.lineTo(-2, 0); ctx.lineTo(-5, 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------- guidance (wordless tutorial)
+function nearest(list, x, y) { let b = null, bd = 1e9; list.forEach(o => { const d = dist(x, y, o.x, o.y); if (d < bd) { bd = d; b = o; } }); return b; }
+function drawGuidance() {
+  const p = g.player, s = g.season, act = bestAction();
+  const tutorial = settings.hints === 'always' || (settings.hints === 'auto' && g.year === 1);
+  const any = settings.hints !== 'off';
+  // context prompt over whatever you can interact with
+  if (act && any) drawBubble(act.x, act.y, [{ key: primaryLabel('action') }, { icon: act.icon, no: act.no }], act.no ? 0.6 : 1);
+  if (!any) return;
+  // critical: hungry with food
+  if (p.hp < 40 && p.fruit > 0) drawBubble(p.x, p.y - 44, [{ key: primaryLabel('eat') }, { icon: 'fruit' }]);
+  if (!tutorial) { if (s === 3 && g.fuel < 30 && p.wood > 0 && (!act || act.type !== 'feed')) drawArrowTo(HEARTH.x, HEARTH.y); return; }
+  if (p.moved < 0.8 && g.t < 12 && g.year === 1 && s === 0 && !touch.used && lastInput !== 'pad') {
+    const k = settings.keys; const y0 = p.y + 30;
+    drawKey(p.x, y0, keyLabel(k.up[0]), 22); drawKey(p.x - 26, y0 + 26, keyLabel(k.left[0]), 22); drawKey(p.x, y0 + 26, keyLabel(k.down[0]), 22); drawKey(p.x + 26, y0 + 26, keyLabel(k.right[0]), 22);
+  }
+  if (act) return;
+  let target = null, parts = null;
+  const items = t => g.items.filter(i => i.type === t);
+  if (s === 0) {
+    const r = g.rabbits.find(r => r.state !== 'flee');
+    if (r) { target = r; parts = [{ icon: 'rabbit' }]; }
+    else if (p.seeds > 0) { const pl = nearest(g.plots.filter(q => q.state === 'empty'), p.x, p.y); if (pl) { target = { x: pl.x, y: pl.y - 22 }; parts = [{ icon: 'seed' }, { text: '→' }, { icon: 'sprout' }]; } }
+    else if (items('seed').length) { const it = nearest(items('seed'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'seed' }]; }
+  } else if (s === 1) {
+    const thirsty = g.plots.filter(q => q.state === 'sprout' && q.thirst < 0.6);
+    if (!p.inShade && p.hp < 70) { const t = nearestShade(); if (t) { target = t; parts = [{ icon: 'sun' }, { text: '→' }, { icon: 'shade' }]; } }
+    else if (thirsty.length && p.bucket === 0) { const a = Math.atan2(p.y - POND.y, p.x - POND.x); target = { x: POND.x + Math.cos(a) * POND.rx * g.pond * 0.7, y: POND.y + Math.sin(a) * POND.ry * g.pond * 0.7 - 10 }; parts = [{ icon: 'bucket' }]; }
+    else if (thirsty.length) { const pl = nearest(thirsty, p.x, p.y); target = { x: pl.x, y: pl.y - 40 }; parts = [{ icon: 'bucket' }, { text: '→' }, { icon: 'sprout' }]; }
+  } else if (s === 2) {
+    if (items('fruit').length) { const it = nearest(items('fruit'), p.x, p.y); target = { x: it.x, y: it.y - 16 }; parts = [{ icon: 'fruit' }]; }
+    else if (items('seed').length) { const it = nearest(items('seed'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'seed' }]; }
+    else if (items('wood').length) { const it = nearest(items('wood'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'wood' }]; }
+  } else {
+    if (p.wood > 0 && g.fuel < 80) { target = { x: HEARTH.x, y: HEARTH.y - 30 }; parts = [{ icon: 'wood' }, { text: '→' }, { icon: 'fire' }]; }
+    else if (g.fuel < 60 && items('wood').length) { const it = nearest(items('wood'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'wood' }]; }
+    else if (!p.warm) { target = { x: HEARTH.x, y: HEARTH.y - 30 }; parts = [{ icon: 'snow' }, { text: '→' }, { icon: 'fire' }]; }
+  }
+  if (target) { drawBubble(target.x, target.y, parts, 0.9); drawArrowTo(target.x, target.y); }
+}
+function nearestShade() {
+  const p = g.player, cands = [{ x: 480, y: 282 }];
+  g.plots.forEach(pl => { if (pl.state === 'tree') cands.push({ x: pl.x + 6, y: pl.y + 8 }); });
+  if (g.pond > 0) cands.push({ x: POND.x, y: POND.y });
+  const n = nearest(cands, p.x, p.y); return n ? { x: n.x, y: n.y - 30 } : null;
+}
+
+// ---------------------------------------------------------------- HUD
+const FONT = 'ui-rounded, "Trebuchet MS", "Segoe UI", system-ui, sans-serif';
+function drawHUD() {
+  const p = g.player, u = UIC();
+  // season wheel
+  const cx = 58, cy = 58, R = 38, frac = (g.season + g.t / g.len) / 4;
+  ctx.fillStyle = 'rgba(16,20,26,0.7)'; ctx.beginPath(); ctx.arc(cx, cy, R + 8 + Math.min(g.year, 6) * 2.5, 0, 6.28); ctx.fill();
+  for (let i = 0; i < Math.min(g.year, 6); i++) { ctx.strokeStyle = 'rgba(214,180,130,0.75)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(cx, cy, R + 5 + i * 2.5, 0, 6.28); ctx.stroke(); }
+  for (let i = 0; i < 4; i++) {
+    const a0 = -1.5708 + i * 1.5708, a1 = a0 + 1.5708;
+    ctx.fillStyle = i === g.season ? u.season[i] : rgba(u.season[i], 0.35);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath(); ctx.fill();
+    const am = a0 + 0.785; drawIcon(['flower', 'sun', 'leaf', 'snow'][i], cx + Math.cos(am) * R * 0.58, cy + Math.sin(am) * R * 0.58, 13);
+  }
+  ctx.strokeStyle = 'rgba(16,20,26,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
+  const na = -1.5708 + frac * 6.2832;
+  const last = g.len - g.t < 3.5;
+  ctx.strokeStyle = last && Math.sin(time * 14) > 0 ? '#ffffff' : '#fdf6e3'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(na) * (R + 3), cy + Math.sin(na) * (R + 3)); ctx.stroke();
+  circle(cx, cy, 4.5, '#fdf6e3');
+  ctx.font = 'bold 11px ' + FONT; ctx.fillStyle = '#fdf6e3'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText((g.endless ? 'YEAR ' + g.year : 'YEAR ' + g.year + '/' + YEARS), cx, cy + R + 14 + Math.min(g.year, 6) * 2.5);
+
+  // health
+  const hx = 128, hy = 22, hw = 220;
+  ctx.fillStyle = 'rgba(16,20,26,0.7)'; rr(hx - 6, hy - 8, hw + 70, 78, 12); ctx.fill();
+  drawIcon('heart', hx + 9, hy + 8, 18);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)'; rr(hx + 24, hy + 1, hw - 30, 14, 7); ctx.fill();
+  const lowHp = p.hp < 30 && Math.sin(time * 10) > 0;
+  ctx.fillStyle = lowHp ? '#ffffff' : u.health; rr(hx + 24, hy + 1, Math.max(0, (hw - 30) * p.hp / 100), 14, 7); ctx.fill();
+  if (p.drain) { const ic = p.drain === 'heat' ? 'sun' : p.drain === 'cold' ? 'snow' : 'hunger'; drawIcon(ic, hx + hw + 6, hy + 8, 16); if (Math.sin(time * 8) > 0) { ctx.fillStyle = p.drain === 'heat' ? u.heat : p.drain === 'cold' ? u.cold : '#d8c9a8'; ctx.font = 'bold 13px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText('▼', hx + hw + 18, hy + 8); } }
+  // inventory
+  const iy = hy + 40; let ix = hx + 4;
+  const inv = [['seed', p.seeds], ['fruit', p.fruit], ['wood', p.wood]];
+  ctx.font = 'bold 16px ' + FONT; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  inv.forEach(([ic, n]) => { drawIcon(ic, ix + 8, iy, 18); ctx.fillStyle = n >= CAP && ic !== 'seed' ? '#ffd24a' : n ? '#fdf6e3' : 'rgba(253,246,227,0.4)'; ctx.fillText(String(n), ix + 22, iy + 1); ix += 58; });
+  drawIcon('bucket', ix + 8, iy, 18);
+  for (let i = 0; i < 3; i++) { ctx.globalAlpha = i < p.bucket ? 1 : 0.25; drawIcon('drop', ix + 26 + i * 12, iy, 11); } ctx.globalAlpha = 1;
+  // next season preview
+  const nx = 920, ny = 34, ns = (g.season + 1) % 4;
+  ctx.fillStyle = 'rgba(16,20,26,0.7)'; rr(nx - 96, ny - 20, 110, 40, 12); ctx.fill();
+  drawIcon(['flower', 'sun', 'leaf', 'snow'][g.season], nx - 74, ny, 20);
+  ctx.fillStyle = '#fdf6e3'; ctx.font = 'bold 15px ' + FONT; ctx.textAlign = 'center'; ctx.fillText(Math.ceil(g.len - g.t) + 's', nx - 44, ny + 1);
+  ctx.fillText('→', nx - 18, ny + 1);
+  drawIcon(['flower', 'sun', 'leaf', 'snow'][ns], nx + 2, ny, 18);
+  if (touch.used) { ctx.fillStyle = 'rgba(16,20,26,0.6)'; circle(912, 92, 18, 'rgba(16,20,26,0.6)'); ctx.fillStyle = '#fdf6e3'; ctx.fillRect(905, 84, 4, 16); ctx.fillRect(915, 84, 4, 16); }
+  // fall wind indicator
+  if (g.season === 2) { ctx.save(); ctx.translate(nx - 40, ny + 40); ctx.rotate(Math.atan2(g.wind.y, g.wind.x)); ctx.globalAlpha = clamp(g.wind.s * 1.5, 0.3, 1); drawIcon('wind', 0, 0, 22); ctx.restore(); ctx.globalAlpha = 1; }
+  // season banner
+  if (g.banner > 0) {
+    const a = clamp(g.banner > 2.6 ? (3.2 - g.banner) / 0.6 : g.banner / 0.8, 0, 1);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = 'rgba(16,20,26,0.55)'; rr(W / 2 - 190, 92, 380, 104, 18); ctx.fill();
+    ctx.fillStyle = u.season[g.season]; ctx.font = '900 46px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(SEASON_NAMES[g.season], W / 2, 128);
+    const rules = [[['seed', 'sprout'], ['rabbit', 'cross']], [['sun', 'shade'], ['bucket', 'sprout']], [['fruit', 'seed'], ['axe', 'wood']], [['wood', 'fire'], ['wolf', 'fire']]][g.season];
+    let rx = W / 2 - 120;
+    rules.forEach(r => { drawIcon(r[0], rx + 16, 172, 22); ctx.fillStyle = '#fdf6e3'; ctx.font = 'bold 16px ' + FONT; ctx.fillText(r[1] === 'cross' ? '' : '→', rx + 44, 172); drawIcon(r[1], rx + (r[1] === 'cross' ? 16 : 72), 172, 22); rx += 140; });
+    ctx.globalAlpha = 1;
+  }
+  // floats
+  g.floats.forEach(f => { ctx.globalAlpha = clamp(1.1 - f.t, 0, 1); drawIcon(f.icon, f.x - 8, f.y, 14); ctx.fillStyle = '#fffdf6'; ctx.strokeStyle = 'rgba(30,20,10,0.7)'; ctx.lineWidth = 3; ctx.font = 'bold 14px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.strokeText(f.txt, f.x + 2, f.y); ctx.fillText(f.txt, f.x + 2, f.y); });
+  ctx.globalAlpha = 1;
+  // damage flash
+  if (g.flash > 0) { const gr = ctx.createRadialGradient(W / 2, H / 2, 200, W / 2, H / 2, 560); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, settings.colorblind ? 'rgba(20,20,40,' + g.flash * 1.8 + ')' : 'rgba(200,30,30,' + g.flash * 1.4 + ')'); ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H); }
+  // touch controls
+  if (touch.used) {
+    ctx.globalAlpha = 0.55;
+    if (touch.stickId !== null) { circle(touch.sx, touch.sy, 46, 'rgba(255,255,255,0.18)'); circle(touch.sx + touch.dx * 40, touch.sy + touch.dy * 40, 20, 'rgba(255,255,255,0.5)'); }
+    circle(860, 450, 44, 'rgba(255,255,255,0.25)'); drawIcon(bestAction() ? bestAction().icon : 'axe', 860, 450, 30);
+    circle(760, 480, 32, 'rgba(255,255,255,0.25)'); drawIcon('fruit', 760, 480, 24);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// =====================================================================
+// MENUS
+// =====================================================================
+let menuSel = 0, menuItems = [], menuRects = [];
+const OPT_LABEL = { gentle: 'Gentle', normal: 'Normal', hard: 'Hard', auto: 'First year', always: 'Always', off: 'Off' };
+function cycle(arr, v, dir) { const i = arr.indexOf(v); return arr[(i + dir + arr.length) % arr.length]; }
+function buildMenu() {
+  if (state === 'title') return [
+    { label: () => 'Play', act: () => startGame() },
+    { label: () => 'Options', act: () => setState('options') },
+    { label: () => 'Credits', act: () => setState('credits') }
+  ];
+  if (state === 'pause') return [
+    { label: () => 'Resume', act: () => setState('play') },
+    { label: () => 'Options', act: () => { optionsBack = 'pause'; setState('options'); } },
+    { label: () => 'Restart', act: () => startGame() },
+    { label: () => 'Quit to title', act: () => toTitle() }
+  ];
+  if (state === 'over') return [{ label: () => 'Try again', act: () => startGame() }, { label: () => 'Title', act: () => toTitle() }];
+  if (state === 'win') return [{ label: () => 'Keep going (endless)', act: () => { g.endless = true; g.year++; enterSeason(0); setState('play'); } }, { label: () => 'Play again', act: () => startGame() }, { label: () => 'Title', act: () => toTitle() }];
+  if (state === 'credits') return [{ label: () => 'Back', act: () => setState('title') }];
+  if (state === 'options') {
+    const opt = (name, get, adj) => ({ label: () => name, value: get, adj, act: () => adj(1) });
+    const keyRow = (name, a) => ({ label: () => name, value: () => rebinding === a ? 'press a key…' : settings.keys[a].slice(0, 2).map(keyLabel).join('  /  '), act: () => { rebinding = a; } });
+    return [
+      opt('Difficulty', () => OPT_LABEL[settings.difficulty], d => { settings.difficulty = cycle(['gentle', 'normal', 'hard'], settings.difficulty, d); }),
+      opt('Colour-blind palette', () => settings.colorblind ? 'On' : 'Off', () => { settings.colorblind = !settings.colorblind; }),
+      opt('Picture hints', () => OPT_LABEL[settings.hints], d => { settings.hints = cycle(['auto', 'always', 'off'], settings.hints, d); }),
+      opt('Reduce motion', () => settings.reduceMotion ? 'On' : 'Off', () => { settings.reduceMotion = !settings.reduceMotion; }),
+      opt('Music', () => '▮'.repeat(settings.music) + '▯'.repeat(10 - settings.music), d => { settings.music = clamp(settings.music + d, 0, 10); applyVolumes(); }),
+      opt('Sound effects', () => '▮'.repeat(settings.sfx) + '▯'.repeat(10 - settings.sfx), d => { settings.sfx = clamp(settings.sfx + d, 0, 10); applyVolumes(); SFX.pickup(); }),
+      keyRow('Move up', 'up'), keyRow('Move down', 'down'), keyRow('Move left', 'left'), keyRow('Move right', 'right'),
+      keyRow('Act (plant, water, chop, feed)', 'action'), keyRow('Eat', 'eat'), keyRow('Pause', 'pause'),
+      { label: () => 'Reset controls', act: () => { settings.keys = JSON.parse(JSON.stringify(DEFAULT_KEYS)); } },
+      { label: () => 'Back', act: () => setState(optionsBack) }
+    ];
+  }
+  return [];
+}
+let optionsBack = 'title';
+function setState(s) {
+  prevState = state; state = s; menuSel = 0; menuItems = buildMenu(); pressedQ.length = 0; clickQ.length = 0;
+  if (s === 'options' && prevState === 'title') optionsBack = 'title';
+  A.duck = s === 'play' || s === 'title' ? 1 : 0.4; applyVolumes();
+  if (s !== 'options') saveSettings();
+}
+function startGame() { g = newGame(false); setState('play'); enterSeason(0); g.banner = 3.2; }
+function toTitle() { g = newGame(true); g.season = 0; setAmbience(0); setState('title'); }
+
+function menuInput() {
+  while (pressedQ.length) {
+    const k = pressedQ.shift();
+    if (rebinding) continue;
+    const up = k === '@up' || k === 'ArrowUp' || isKey('up', k), dn = k === '@down' || k === 'ArrowDown' || isKey('down', k);
+    const lf = k === '@left' || k === 'ArrowLeft' || isKey('left', k), rt = k === '@right' || k === 'ArrowRight' || isKey('right', k);
+    const ok = k === '@action' || k === 'Enter' || k === 'Space' || isKey('action', k);
+    const back = k === '@back' || k === '@pause' || k === 'Escape' || isKey('pause', k);
+    if (up) { menuSel = (menuSel - 1 + menuItems.length) % menuItems.length; SFX.menu(); }
+    else if (dn) { menuSel = (menuSel + 1) % menuItems.length; SFX.menu(); }
+    else if ((lf || rt) && menuItems[menuSel] && menuItems[menuSel].adj) { menuItems[menuSel].adj(rt ? 1 : -1); SFX.menu(); saveSettings(); }
+    else if (ok) { const it = menuItems[menuSel]; if (it) { SFX.select(); it.act(); saveSettings(); } return; }
+    else if (back) {
+      if (state === 'pause') { setState('play'); return; }
+      if (state === 'options') { setState(optionsBack); return; }
+      if (state === 'credits') { setState('title'); return; }
+    }
+  }
+  while (clickQ.length) {
+    const c = clickQ.shift();
+    menuRects.forEach((r, i) => {
+      if (c.x > r.x && c.x < r.x + r.w && c.y > r.y && c.y < r.y + r.h) {
+        menuSel = i; const it = menuItems[i]; SFX.select();
+        if (it.adj && c.x < r.x + r.w * 0.5 && it.value) it.adj(-1); else it.act();
+        saveSettings();
+      }
+    });
+  }
+  // hover
+  if (lastInput === 'mouse') menuRects.forEach((r, i) => { if (pointer.x > r.x && pointer.x < r.x + r.w && pointer.y > r.y && pointer.y < r.y + r.h) menuSel = i; });
+}
+function drawMenu(x, y, w, rowH) {
+  menuRects = [];
+  ctx.textBaseline = 'middle';
+  menuItems.forEach((it, i) => {
+    const ry = y + i * rowH, sel = i === menuSel;
+    menuRects.push({ x: x - w / 2, y: ry, w, h: rowH - 6 });
+    ctx.fillStyle = sel ? 'rgba(253,246,227,0.95)' : 'rgba(16,20,26,0.6)'; rr(x - w / 2, ry, w, rowH - 6, 10); ctx.fill();
+    ctx.fillStyle = sel ? '#1b2026' : '#fdf6e3';
+    if (it.value) {
+      ctx.font = '600 15px ' + FONT; ctx.textAlign = 'left'; ctx.fillText(it.label(), x - w / 2 + 16, ry + (rowH - 6) / 2);
+      ctx.font = 'bold 15px ' + FONT; ctx.textAlign = 'right'; ctx.fillText((it.adj ? '◂ ' : '') + it.value() + (it.adj ? ' ▸' : ''), x + w / 2 - 16, ry + (rowH - 6) / 2);
+    } else { ctx.font = 'bold 18px ' + FONT; ctx.textAlign = 'center'; ctx.fillText(it.label(), x, ry + (rowH - 6) / 2); }
+  });
+}
+function drawTitle() {
+  ctx.fillStyle = 'rgba(12,16,22,0.35)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const u = UIC();
+  // title with the season colours cycling through the letters
+  ctx.font = '900 78px ' + FONT;
+  const word = 'PERENNIAL'; let total = 0; const ws = [...word].map(ch => { const w = ctx.measureText(ch).width; total += w + 2; return w; });
+  let x = W / 2 - total / 2;
+  [...word].forEach((ch, i) => {
+    const y = 130 + (settings.reduceMotion ? 0 : Math.sin(time * 2 + i * 0.5) * 4);
+    ctx.fillStyle = 'rgba(10,14,20,0.6)'; ctx.fillText(ch, x + ws[i] / 2 + 3, y + 4);
+    ctx.fillStyle = u.season[Math.floor(i / 2.25) % 4]; ctx.fillText(ch, x + ws[i] / 2, y);
+    x += ws[i] + 2;
+  });
+  ctx.font = '600 18px ' + FONT; ctx.fillStyle = '#fdf6e3';
+  ctx.fillText('One tree is shade in summer, food in fall and fire in winter.', W / 2, 190);
+  drawMenu(W / 2, 250, 260, 54);
+  ctx.font = '600 13px ' + FONT; ctx.fillStyle = 'rgba(253,246,227,0.75)';
+  if (best) ctx.fillText('Best: ' + best + ' rings', W / 2, 432);
+  // control legend in pictures
+  const k = settings.keys, ly = 478;
+  let lx = W / 2 - 250;
+  [k.up[0], k.left[0], k.down[0], k.right[0]].forEach((c, i) => { drawKey(lx + i * 26, ly, keyLabel(c), 22); });
+  ctx.fillStyle = '#fdf6e3'; ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.fillText('move', lx + 110, ly);
+  lx += 175; const w1 = drawKey(lx + 22, ly, keyLabel(k.action[0]), 22); ctx.fillStyle = '#fdf6e3'; ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.fillText('act', lx + 26 + w1 / 2, ly);
+  lx += 105; drawKey(lx + 11, ly, keyLabel(k.eat[0]), 22); ctx.fillStyle = '#fdf6e3'; ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.fillText('eat', lx + 28, ly);
+  lx += 80; drawKey(lx + 14, ly, keyLabel(k.pause[0]), 22); ctx.fillStyle = '#fdf6e3'; ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.fillText('pause', lx + 34, ly);
+  ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(253,246,227,0.55)'; ctx.font = '600 12px ' + FONT; ctx.fillText('Gamepad and touch work too.', W / 2, 512);
+}
+function panel(x, y, w, h) { ctx.fillStyle = 'rgba(14,18,24,0.88)'; rr(x, y, w, h, 18); ctx.fill(); ctx.strokeStyle = 'rgba(253,246,227,0.15)'; ctx.lineWidth = 1.5; ctx.stroke(); }
+function drawOptions() {
+  ctx.fillStyle = 'rgba(8,10,14,0.55)'; ctx.fillRect(0, 0, W, H);
+  panel(W / 2 - 290, 12, 580, 518);
+  ctx.fillStyle = '#fdf6e3'; ctx.font = '900 26px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Options', W / 2, 40);
+  drawMenu(W / 2, 62, 540, 29);
+  ctx.font = '600 12px ' + FONT; ctx.fillStyle = 'rgba(253,246,227,0.6)';
+  ctx.fillText(rebinding ? 'Press the new key. Esc cancels.' : '←/→ change a value. Enter or click a control to rebind it.', W / 2, 515);
+}
+function drawCredits() {
+  ctx.fillStyle = 'rgba(8,10,14,0.55)'; ctx.fillRect(0, 0, W, H);
+  panel(W / 2 - 300, 60, 600, 420);
+  ctx.fillStyle = '#fdf6e3'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '900 28px ' + FONT; ctx.fillText('Perennial', W / 2, 100);
+  ctx.font = '600 15px ' + FONT;
+  ['Made for the ThunderHacks 2026 Algoma Game Jam.', 'Theme: Four Seasons.', '',
+    'Every shape is drawn in code on an HTML5 canvas.', 'Every note and sound is synthesized live with Web Audio.',
+    'No third-party assets, engines or libraries are used.', '', 'Fonts: your system\'s own rounded or sans-serif face.']
+    .forEach((l, i) => ctx.fillText(l, W / 2, 150 + i * 28));
+  drawMenu(W / 2, 400, 200, 52);
+}
+function drawPause() {
+  ctx.fillStyle = 'rgba(8,10,14,0.6)'; ctx.fillRect(0, 0, W, H);
+  panel(W / 2 - 330, 60, 660, 420);
+  ctx.fillStyle = '#fdf6e3'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '900 30px ' + FONT; ctx.fillText('Paused', W / 2, 98);
+  // the four seasons, explained in pictures
+  const rows = [
+    ['flower', [['seed', '→', 'sprout'], ['rabbit', '✕', 'sprout']]],
+    ['sun', [['sun', '→', 'shade'], ['bucket', '→', 'sprout']]],
+    ['leaf', [['fruit', '+', 'seed'], ['axe', '→', 'wood']]],
+    ['snow', [['wood', '→', 'fire'], ['fruit', '→', 'heart']]]
+  ];
+  const u = UIC();
+  rows.forEach((r, i) => {
+    const y = 148 + i * 44, x = W / 2 - 290;
+    ctx.fillStyle = rgba(u.season[i], 0.25); rr(x, y - 18, 270, 36, 10); ctx.fill();
+    drawIcon(r[0], x + 22, y, 22);
+    r[1].forEach((seq, j) => { const bx = x + 60 + j * 105; drawIcon(seq[0], bx, y, 20); ctx.fillStyle = '#fdf6e3'; ctx.font = 'bold 16px ' + FONT; ctx.fillText(seq[1], bx + 22, y); drawIcon(seq[2], bx + 44, y, 20); });
+  });
+  drawMenu(W / 2 + 160, 130, 260, 52);
+  const k = settings.keys; ctx.font = '600 13px ' + FONT;
+  let lx = W / 2 - 290; const ly = 340;
+  drawKey(lx + 12, ly, keyLabel(k.action[0]), 22); ctx.fillStyle = '#fdf6e3'; ctx.textAlign = 'left'; ctx.fillText('plant · water · chop · feed fire · fill bucket', lx + 50, ly);
+  drawKey(lx + 12, ly + 32, keyLabel(k.eat[0]), 22); ctx.fillStyle = '#fdf6e3'; ctx.textAlign = 'left'; ctx.fillText('eat a fruit to heal', lx + 50, ly + 32);
+  ctx.fillText('Walk over seeds, fruit and wood to pick them up.', lx, ly + 64);
+  ctx.fillText('Survive ' + YEARS + ' winters to win. Trees you keep pay off every year.', lx, ly + 90);
+  ctx.textAlign = 'center';
+}
+function drawEnd(won) {
+  ctx.fillStyle = 'rgba(8,10,14,0.62)'; ctx.fillRect(0, 0, W, H);
+  panel(W / 2 - 260, 70, 520, 400);
+  const u = UIC(), s = g.stats;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = won ? u.season[0] : '#fdf6e3'; ctx.font = '900 34px ' + FONT;
+  ctx.fillText(won ? 'The grove endures' : 'The valley rests', W / 2, 112);
+  ctx.font = '600 15px ' + FONT; ctx.fillStyle = 'rgba(253,246,227,0.85)';
+  const causeText = { heat: 'The summer sun was too much.', cold: 'The cold found you away from the fire.', wolves: 'The wolves caught you in the dark.', hunger: 'The winter stores ran out.' };
+  ctx.fillText(won ? YEARS + ' years, ' + YEARS + ' winters. Your trees will outlast you.' : (causeText[g.cause] || 'Your strength gave out.'), W / 2, 146);
+  if (!won && g.cause) drawIcon({ heat: 'sun', cold: 'snow', wolves: 'wolf', hunger: 'hunger' }[g.cause], W / 2, 180, 26);
+  // tree-ring score
+  const rx = W / 2 - 150, ry = 250;
+  for (let i = Math.min(12, Math.ceil(s.score / 60)); i > 0; i--) circle(rx, ry, 8 + i * 4, i % 2 ? '#c9a27a' : '#b08458');
+  circle(rx, ry, 8, '#7a5235');
+  ctx.fillStyle = '#fdf6e3'; ctx.font = '900 30px ' + FONT; ctx.fillText(String(s.score), rx, ry + 76);
+  ctx.font = '600 12px ' + FONT; ctx.fillText(s.best ? 'new best!' : 'rings · best ' + best, rx, ry + 100);
+  const stats = [['flower', 'Years', s.years], ['shade', 'Trees standing', s.trees], ['sprout', 'Seeds planted', s.planted], ['fruit', 'Fruit gathered', s.fruit], ['rabbit', 'Rabbits shooed', s.rabbits], ['wolf', 'Wolves held off', s.wolves]];
+  ctx.textAlign = 'left'; ctx.font = '600 15px ' + FONT;
+  stats.forEach((r, i) => { const y = 206 + i * 26; drawIcon(r[0], W / 2 - 40, y, 16); ctx.fillStyle = '#fdf6e3'; ctx.fillText(r[1], W / 2 - 20, y); ctx.textAlign = 'right'; ctx.fillText(String(r[2]), W / 2 + 200, y); ctx.textAlign = 'left'; });
+  drawMenu(W / 2, won ? 372 : 382, 300, won ? 32 : 40);
+}
+
+// =====================================================================
+// MAIN LOOP
+// =====================================================================
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; time += dt;
+  pollPad();
+  if (state === 'play') update(dt);
+  else if (state === 'title') { update(dt); menuInput(); }
+  else menuInput();
+  if (state === 'over' || state === 'win') { /* frozen world */ }
+  // draw
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0b0f12'; ctx.fillRect(0, 0, cv.width, cv.height);
+  const sh = g && g.shake && !settings.reduceMotion ? g.shake : 0;
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * offX + rand(-sh, sh) * dpr * scale, dpr * offY + rand(-sh, sh) * dpr * scale);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+  drawWorld();
+  if (state === 'play' || state === 'pause') { drawGuidance(); drawHUD(); }
+  if (state === 'title') drawTitle();
+  if (state === 'options') drawOptions();
+  if (state === 'credits') drawCredits();
+  if (state === 'pause') drawPause();
+  if (state === 'over') drawEnd(false);
+  if (state === 'win') drawEnd(true);
+  ctx.restore();
+  requestAnimationFrame(frame);
+}
+g = newGame(true);
+menuItems = buildMenu();
+requestAnimationFrame(frame);
+cv.focus();
+
+// small hook for automated testing
+window.__perennial = { get g() { return g; }, get state() { return state; }, start: startGame, step: dt => update(dt), keys: down, act: () => doAction(), eat: () => eat(), season: s => { if (g && !g.demo) { if (s === 0) endOfYear(); else enterSeason(s); } }, settings };
+</script>
+
+</html>
