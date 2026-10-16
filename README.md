@@ -38,7 +38,7 @@ Walk over seeds, fruit and wood to pick them up. Survive **3 winters** to win; a
 | Season | What changes | Your job | Danger |
 |---|---|---|---|
 | **Spring** (rain) | Soil is soft. Seeds can only be planted now. The pond is full. | Plant seeds in the soil plots. | Rabbits come to eat your sprouts. Chase them off. |
-| **Summer** (heat) | The sun hurts you outside of shade. The pond shrinks. Sprouts dry out. | Carry water from the pond to your sprouts. Rest in tree shade or on the porch. | Heat stroke. Sprouts that dry out wither. |
+| **Summer** (heat) | Summer lasts 10 seconds longer than the other seasons. The sun hurts you outside of shade. The pond shrinks. Sprouts dry out. | Carry water from the pond to your sprouts. Rest in tree shade or on the porch. | Heat stroke. Sprouts that dry out wither. |
 | **Fall** (wind) | Sprouts that survived become trees. Trees drop fruit, seeds and branches. Wind pushes you and blows loose fruit away; fruit blown into the pond or off the map is lost. | Gather fruit (basket holds 6) and wood (arms hold 6). Collect seeds for next spring. Stock the fire. | Fruit left on the ground rots when winter comes. |
 | **Winter** (snow, night) | It's dark and you move slowly through snow. The fire burns fuel fast. Hunger is sharp. The pond freezes over (slippery). | Keep the hearth burning. Eat. Venture into the dark for deadwood, or chop one of your own trees. | Cold away from the fire light. Wolves in the dark. Standing on the ice when spring thaws drops you in. |
 
@@ -59,13 +59,9 @@ Once it has a house, the dog goes home when you do: whenever you're on the porch
 
 If you don't adopt it by the end of summer, it leaves, and it comes back next summer. Press the act key beside your dog when there's nothing else to do, and you'll pet it.
 
-![The dog and its house](screenshots/dog.png)
-
 ### The porch cat
 
 At the start of year 2, a white cat wanders in, hops up onto the red porch beam of the cabin and lies stretched out along it for the rest of the game. Its tail hangs over the edge and swings lazily. Now and then it opens its yellow eyes for a look around, then dozes off again. It wears a little red scarf in winter. Stand beside it and press the act key to pet it: it purrs and a **yellow heart** pops up. Petting the dog pops a **red heart**.
-
-![The porch cat](screenshots/cat.png)
 
 ### The sun jar: carry summer into winter
 
@@ -76,8 +72,6 @@ You start with an empty glass jar, shown at the right end of your item bar.
 - **Winter:** away from the fire, press the act key to open it. For 10 seconds a circle of summer moves with you: you stay warm, the dark lifts, and the snow melts under your feet so you walk at full speed. It doesn't stop wolves; that's the dog's job.
 
 Then the jar is empty until next summer. It turns the season itself into something you can store and spend, and it makes a long trip into the dark for wood possible.
-
-![Opening the sun jar in winter](screenshots/jar-winter.png)
 
 ### Tree memories
 
@@ -118,6 +112,25 @@ So the player plans a cycle: plant more in spring to have more shade, food and f
 - **Winter to spring:** the ice visibly cracks in the last 5 seconds; anyone still on it falls through.
 - Each new year is harder (hotter summers, colder and hungrier winters, more rabbits and wolves).
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Spring: sprouts, a rabbit coming for them, the cat on the porch](screenshots/spring.png) | ![Summer: the sun jar filling while you water sprouts](screenshots/summer.png) |
+| **Spring:** plant seeds; a red **!!** marks a rabbit going for your sprouts | **Summer:** carry water in the heat while the sun jar fills |
+| ![Fall: trees heavy with fruit, the dog fetching](screenshots/fall.png) | ![Winter: the hearth, deadwood glowing in the dark](screenshots/winter.png) |
+| **Fall:** gather fruit and wood; the dog fetches for you | **Winter:** keep the fire alive and venture into the dark for wood |
+| ![The summer wildfire](screenshots/fire.png) | ![The fall gust](screenshots/gust.png) |
+| **Wildfire:** one tree and two sprouts at most; one splash puts each out | **Gust:** fruit flies everywhere; fruit blown into the pond sinks |
+| ![The winter blizzard](screenshots/blizzard.png) | ![A felled tree's summer ghost](screenshots/ghost.png) |
+| **Blizzard:** the light shrinks and a wolf comes in | **Tree memories:** a felled tree flashes its summer shade, year and rings |
+| ![Opening the sun jar in winter](screenshots/jar-winter.png) | ![The guard rabbit and the crow's gift](screenshots/spring2.png) |
+| **Sun jar:** a circle of summer in the dark | **Animals remember:** the guard rabbit and the crow's gift of seeds |
+| ![The dog and its house](screenshots/dog.png) | ![A dog with no house shivers by the fire](screenshots/dog-winter.png) |
+| **The dog** helps you all year | **No house?** It shivers by the fire and shows what it needs |
+| ![The dog napping at its house](screenshots/dog-resting.png) | ![The white cat on the porch beam](screenshots/cat.png) |
+| **Home:** the dog naps at its house when you're home | **The porch cat** arrives in year 2 |
+
 ## Accessibility (Options menu)
 
 - **Remappable controls** for every action (two keys per action; the second is a fixed alternative).
@@ -155,6 +168,6 @@ Tools used to make it: a text editor, a web browser, and Playwright with headles
 ## Files
 
 - `index.html`: the complete game
-- `screenshots/`: one screenshot per season, the title screen, the dog, the weather events and the sun jar
+- `screenshots/`: every season, each weather event, the sun jar, the dog, the cat and the title screen
 - `PITCH.md`: a 5-minute pitch script and likely judge questions
 - `SUBMISSION.md`: the deliverables checklist mapped to the brief and rubric
