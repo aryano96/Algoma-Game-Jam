@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perennial: pitch deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400..700&family=Nunito+Sans:wght@400;700&display=swap">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: #111813; overflow: hidden; font-family: 'Nunito Sans', Arial, sans-serif; }
+  #stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  #stage > section { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; }
+  #stage > section:not(.on) { display: none !important; }
+  section ul { padding-left: 1.2em; }
+  section a { color: inherit; }
+  section aside { display: none; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 12px; align-items: center; justify-content: center; padding: 10px; color: #DCD6C8; font-size: 15px; opacity: 0; transition: opacity .3s; }
+  body:hover #bar, #bar:focus-within { opacity: 1; }
+  #bar button { background: #2B3A31; color: #F5F0E6; border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  #notes { position: fixed; left: 16px; right: 16px; bottom: 56px; max-height: 30vh; overflow: auto; background: rgba(20,28,23,.95); color: #F5F0E6; padding: 16px 20px; border-radius: 12px; font-size: 17px; line-height: 1.5; display: none; }
+  #notes.on { display: block; }
+</style>
+</head>
+<body>
+<div id="stage">
+<section id="cover" data-transition="fade" style="background:#1F2A24;color:#F5F0E6;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:row;align-items:center;gap:80px">
+<div style="flex:1;display:flex;flex-direction:column;gap:32px">
+<p style="font-size:32px;color:#E9A35A;font-weight:700;letter-spacing:4px;text-transform:uppercase">ThunderHacks II · Four Seasons</p>
+<h1 style="font-family:'Fredoka', Arial, sans-serif;font-size:120px;font-weight:600;line-height:1">Perennial</h1>
+<p style="font-size:44px;line-height:1.3;color:#DCD6C8">One tree is shade in summer, food in fall and fire in winter.</p>
+<p style="font-size:32px;color:#B8C4BC">Aryan · Algoma Game Jam 2026</p>
+</div>
+<img src="../screenshots/title.png" alt="Perennial title screen" style="width:880px;height:495px;object-fit:cover;border-radius:24px;box-shadow:0 24px 64px rgba(0,0,0,0.45)">
+<aside>Have the game open full screen with sound on, sitting on the title screen. Hook: “In Perennial, one tree is three things. In summer it’s shade, in fall it’s food, and in winter it’s firewood. You can’t have all three. Every tree you burn to survive tonight is one you won’t have next year.”</aside>
+</section>
+<section id="hook" data-transition="fade" style="background:#E9A35A;color:#1F2A24;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;justify-content:space-between;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">One tree, three meanings</h2>
+<div style="display:flex;flex-direction:row;gap:32px">
+<div style="flex:1;display:flex;flex-direction:column;gap:16px;background:#F5F0E6;padding:48px;border-radius:24px">
+<p style="font-size:32px;font-weight:700;color:#7A4A12;text-transform:uppercase;letter-spacing:2px">Summer</p>
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600">Shade</h3>
+<p style="font-size:32px;line-height:1.35">The only shelter from the sun, besides the porch.</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:16px;background:#F5F0E6;padding:48px;border-radius:24px">
+<p style="font-size:32px;font-weight:700;color:#7A4A12;text-transform:uppercase;letter-spacing:2px">Fall</p>
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600">Food</h3>
+<p style="font-size:32px;line-height:1.35">Fruit, seeds for next spring, and branches.</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:16px;background:#F5F0E6;padding:48px;border-radius:24px">
+<p style="font-size:32px;font-weight:700;color:#7A4A12;text-transform:uppercase;letter-spacing:2px">Winter</p>
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600">Fire</h3>
+<p style="font-size:32px;line-height:1.35">Chop it for 2 or 3 logs, and it’s gone forever.</p>
+</div>
+</div>
+<p style="font-family:'Fredoka', Arial, sans-serif;font-size:56px;font-weight:500;line-height:1.2">You can’t have all three. Every tree you burn tonight is one you won’t have next year.</p>
+<aside>This is the one idea the whole game is built on. Say it slowly, then press Enter in the game to start spring.</aside>
+</section>
+<section id="seasons" data-transition="fade" style="background:#F5F0E6;color:#1F2A24;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">Each season changes the rules</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:16px">
+<img src="../screenshots/spring.png" alt="Spring: sprouts in the plots and a rabbit heading for them" style="width:392px;height:220px;object-fit:cover;border-radius:16px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#3E7C59">Spring</h3>
+<p style="font-size:28px;line-height:1.35">Seeds can only be planted now.</p>
+<p style="font-size:24px;line-height:1.35;color:#4A5246"><b>Danger:</b> rabbits eat sprouts.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px">
+<img src="../screenshots/summer.png" alt="Summer: carrying water while the sun jar fills" style="width:392px;height:220px;object-fit:cover;border-radius:16px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#A85A12">Summer</h3>
+<p style="font-size:28px;line-height:1.35">Water sprouts from a shrinking pond.</p>
+<p style="font-size:24px;line-height:1.35;color:#4A5246"><b>Danger:</b> heat outside the shade.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px">
+<img src="../screenshots/fall.png" alt="Fall: trees heavy with fruit and the dog fetching" style="width:392px;height:220px;object-fit:cover;border-radius:16px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#9C3F1F">Fall</h3>
+<p style="font-size:28px;line-height:1.35">Sprouts become trees. Gather fruit and wood in the wind.</p>
+<p style="font-size:24px;line-height:1.35;color:#4A5246"><b>Danger:</b> fruit left out rots.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px">
+<img src="../screenshots/winter.png" alt="Winter: the hearth and glowing deadwood in the dark" style="width:392px;height:220px;object-fit:cover;border-radius:16px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#2F5D8A">Winter</h3>
+<p style="font-size:28px;line-height:1.35">Dark and slow. Keep the fire burning.</p>
+<p style="font-size:24px;line-height:1.35;color:#4A5246"><b>Danger:</b> cold and wolves.</p>
+</div>
+</div>
+<aside>Play through the year while this is up. Spring: plant two seeds, chase off a rabbit. “Seeds can only go in the ground in spring. The wheel in the corner is a clock you plan around.” Summer: step out of the shade and show health draining; step under a tree. Fill the bucket and water a sprout: “If it dries out, it won’t be a tree in fall.” Fall: fruit falls, wind pushes you. “Your basket holds six. Whatever you leave on the ground rots when winter comes.” Winter: feed the fire, grab glowing deadwood in the dark, run back to the light when a wolf howls.</aside>
+</section>
+<section id="tutorial" data-transition="fade" style="background:#F5F0E6;color:#1F2A24;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">The first year teaches without text</h2>
+<div style="display:flex;flex-direction:row;gap:64px;align-items:center">
+<img src="../screenshots/spring.png" alt="Spring with picture hint bubbles over the plots" style="width:960px;height:540px;object-fit:cover;border-radius:24px">
+<ul style="flex:1;font-size:32px;line-height:1.4;display:flex;flex-direction:column;gap:24px">
+<li>Keycaps under the character until you move</li>
+<li>Picture bubbles point to the next useful thing</li>
+<li>Each season opens with two picture rules</li>
+<li>The pause screen shows every season in pictures</li>
+</ul>
+</div>
+<aside>Don’t explain anything here. Point at the game teaching itself: keycaps under the character, then a seed bubble, then a plot bubble. A crossed-out sprout shows seeds can’t be planted out of season.</aside>
+</section>
+<section id="choice" data-transition="fade" style="background:#1F2A24;color:#F5F0E6;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">The winter choice</h2>
+<div style="display:flex;flex-direction:row;gap:64px;align-items:center">
+<div style="flex:1;display:flex;flex-direction:column;gap:32px">
+<p style="font-family:'Fredoka', Arial, sans-serif;font-size:56px;font-weight:500;line-height:1.2;color:#E9A35A">Three logs now, or shade and fruit next year?</p>
+<p style="font-size:32px;line-height:1.4;color:#DCD6C8">Each tree is carved with the year you planted it. Chop it and the stump shows its rings, while a ghost of its summer shade flashes over it.</p>
+<p style="font-size:32px;line-height:1.4;color:#DCD6C8">You see exactly what you gave up.</p>
+</div>
+<img src="../screenshots/ghost.png" alt="A felled tree’s summer ghost over its stump, labelled with its year and rings" style="width:880px;height:495px;object-fit:cover;border-radius:24px">
+</div>
+<aside>Chop a tree live. “This is the choice the whole game is built on. Three logs now, or shade and fruit next year.” Point at the ghost of the tree and its rings. Each new year is harder too: hotter summers, colder and hungrier winters, more rabbits and wolves.</aside>
+</section>
+<section id="jar" data-transition="fade" style="background:#1F2A24;color:#F5F0E6;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">The sun jar: summer, saved for winter</h2>
+<div style="display:flex;flex-direction:row;gap:64px;align-items:center">
+<img src="../screenshots/jar-winter.png" alt="Opening the sun jar in winter: a warm circle of summer in the dark" style="width:880px;height:495px;object-fit:cover;border-radius:24px">
+<div style="flex:1;display:flex;flex-direction:column;gap:32px">
+<div style="display:flex;flex-direction:column;gap:8px">
+<p style="font-size:28px;font-weight:700;color:#E9A35A;text-transform:uppercase;letter-spacing:2px">Summer</p>
+<p style="font-size:32px;line-height:1.4">Fill it by standing in the sun. The heat costs you health.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<p style="font-size:28px;font-weight:700;color:#8FB8DE;text-transform:uppercase;letter-spacing:2px">Winter</p>
+<p style="font-size:32px;line-height:1.4">Open it in the dark for 10 seconds of warmth, light and full speed.</p>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#B8C4BC">It doesn’t stop wolves. That’s the dog’s job.</p>
+</div>
+</div>
+<aside>Walk away from the fire and open the jar you filled in summer. The dark turns gold around you. “This is summer in a jar. You paid for it with health in the heat, and now you can spend it on a trip into the dark.” The season itself becomes a resource you store and spend.</aside>
+</section>
+<section id="friends" data-transition="fade" style="background:#F5F0E6;color:#1F2A24;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">Animals that remember you</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:40px">
+<div style="display:flex;flex-direction:column;gap:16px">
+<img src="../screenshots/dog.png" alt="The adopted dog beside its house" style="width:528px;height:297px;object-fit:cover;border-radius:16px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#A85A12">The stray dog</h3>
+<p style="font-size:28px;line-height:1.35">Adopt it in summer. Its house costs 4 wood, the same wood your fire needs. Then it chases rabbits, fetches fruit and barks wolves away.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px">
+<img src="../screenshots/spring2.png" alt="The guard rabbit and the crow’s gift of seeds in spring" style="width:528px;height:297px;object-fit:cover;border-radius:16px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#3E7C59">Rabbit and crow</h3>
+<p style="font-size:28px;line-height:1.35">Feed a hungry rabbit in fall and it guards your sprouts next spring. Let the crow take a seed and it returns two.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px">
+<img src="../screenshots/cat.png" alt="The white cat napping on the porch beam" style="width:528px;height:297px;object-fit:cover;border-radius:16px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#2F5D8A">The porch cat</h3>
+<p style="font-size:28px;line-height:1.35">Arrives in year 2 and naps on the porch beam. Pet it and it purrs.</p>
+</div>
+</div>
+<aside>In summer, walk up to the stray dog and press Space to adopt it. “It costs 4 wood for its house, and that’s the same wood you need for the fire.” In winter, if the dog has a house, let it bark a wolf away. Without a house it shivers by the fire. Mention the rabbit and crow as choices that pay back next year, and the cat as a small reward for lasting into year 2.</aside>
+</section>
+<section id="events" data-transition="fade" style="background:#F5F0E6;color:#1F2A24;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">Season changes are gameplay</h2>
+<div style="display:flex;flex-direction:row;gap:64px;align-items:start">
+<div style="flex:1;display:flex;flex-direction:column;gap:24px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#A85A12">Transitions you play through</h3>
+<ul style="font-size:32px;line-height:1.4;display:flex;flex-direction:column;gap:12px">
+<li>Surviving sprouts become trees</li>
+<li>Fruit left on the ground rots</li>
+<li>Dusk falls at the end of fall</li>
+<li>The ice cracks, and drops you in at the thaw</li>
+</ul>
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#A85A12">One weather event, warned on the wheel</h3>
+<p style="font-size:32px;line-height:1.4">Summer wildfire, fall gust, winter blizzard.</p>
+</div>
+<img src="../screenshots/fire.png" alt="The summer wildfire spreading from a tree to sprouts" style="width:800px;height:450px;object-fit:cover;border-radius:24px">
+</div>
+<aside>If there’s time, stand on the ice at the end of winter so the cracks show, then step off. The red dot on the season wheel shows when the weather event will hit, and a red warning counts down 3 seconds before it. Wildfire: at most one tree and two sprouts catch; one splash from the bucket puts each out. Gust: double wind, fruit flies across the map and sinks if it lands in the pond. Blizzard: the light shrinks and a wolf comes in.</aside>
+</section>
+<section id="craft" data-transition="fade" style="background:#1F2A24;color:#F5F0E6;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">Made during the jam, playable anywhere</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:20px;background:#2B3A31;padding:48px;border-radius:24px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#E9A35A">Art and audio</h3>
+<p style="font-size:32px;line-height:1.4">Every pixel drawn in code, in one paper diorama style with four palettes.</p>
+<p style="font-size:32px;line-height:1.4">Music and sound synthesized live, a different key and instrument each season.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;background:#2B3A31;padding:48px;border-radius:24px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#E9A35A">Accessibility</h3>
+<p style="font-size:32px;line-height:1.4">Remappable keys, colour-blind palette, three difficulties, hint levels, reduce motion and volume.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;background:#2B3A31;padding:48px;border-radius:24px">
+<h3 style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:600;color:#E9A35A">Runs anywhere</h3>
+<p style="font-size:32px;line-height:1.4">One HTML file, offline, no install. Keyboard, gamepad or touch.</p>
+</div>
+</div>
+<p style="font-family:'Fredoka', Arial, sans-serif;font-size:44px;font-weight:500;color:#DCD6C8">Zero third-party assets: no engine, library, image, sound or font file.</p>
+<aside>Open Options in the game and show the remappable keys, the colour-blind palette, the three difficulties, hint levels, reduce motion and volume. Mention it was playtested in headless Chromium with zero console errors, and that a scripted bot played full games at every difficulty to tune balance.</aside>
+</section>
+<section id="brief" data-transition="fade" style="background:#F5F0E6;color:#1F2A24;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:48px">
+<h2 style="font-family:'Fredoka', Arial, sans-serif;font-size:72px;font-weight:600;line-height:1.1">How Perennial meets the brief</h2>
+<table style="font-size:32px;color:#1F2A24">
+<tr><th style="width:28%;text-align:left">Criterion</th><th style="width:72%;text-align:left">What we built</th></tr>
+<tr><td>Theme</td><td>The seasons are the rules, not a backdrop.</td></tr>
+<tr><td>Gameplay and fun</td><td>A short year, a tense first winter, a “one more year” pull.</td></tr>
+<tr><td>Art and audio</td><td>One style, four palettes, live music for each season.</td></tr>
+<tr><td>Playable build</td><td>One offline file. Survive 3 winters to win, then endless.</td></tr>
+<tr><td>Originality</td><td>One object changes meaning every season, and the season itself is stored in a jar.</td></tr>
+</table>
+<aside>“Take the seasons away and there is no game. Planting, watering, harvesting and burning only make sense in that order, on a clock.” Most season games swap tilesets; here the tree changes meaning every season, and the strongest move in winter is the weakest move for next year.</aside>
+</section>
+<section id="close" data-transition="fade" style="background:#1F2A24;color:#F5F0E6;font-family:'Nunito Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;justify-content:center;gap:48px">
+<h1 style="font-family:'Fredoka', Arial, sans-serif;font-size:96px;font-weight:600;line-height:1.1">Perennial means something that comes back every year.</h1>
+<p style="font-family:'Fredoka', Arial, sans-serif;font-size:56px;font-weight:500;color:#E9A35A">So do the players.</p>
+<div style="display:flex;flex-direction:column;gap:16px">
+<p style="font-size:32px;color:#B8C4BC">Play it now</p>
+<p style="font-size:44px;font-weight:700"><a target="_blank" rel="noopener" href="https://aryano96.github.io/Algoma-Game-Jam/">aryano96.github.io/Algoma-Game-Jam</a></p>
+<p style="font-size:32px;color:#B8C4BC">Code: <a target="_blank" rel="noopener" href="https://github.com/aryano96/Algoma-Game-Jam">github.com/aryano96/Algoma-Game-Jam</a></p>
+</div>
+<aside>“Three winters to win, endless after that, and your score is counted in tree rings. Perennial means something that comes back every year. So do the players.” Then invite the judges to play. If asked what’s next: animals that migrate between seasons, a seasonal map that grows across years, and a two-player mode with a gardener and a woodcutter.</aside>
+</section>
+</div>
+<div id="notes" aria-live="polite"></div>
+<div id="bar">
+  <button id="prev" aria-label="Previous slide">&larr;</button>
+  <span id="count"></span>
+  <button id="next" aria-label="Next slide">&rarr;</button>
+  <button id="nbtn">Notes (N)</button>
+  <button id="fbtn">Full screen (F)</button>
+</div>
+<script>
+  const stage = document.getElementById('stage');
+  const slides = [...stage.children];
+  const notes = document.getElementById('notes');
+  let i = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1)) || 1) - 1));
+  function fit() {
+    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+    stage.style.transform = `scale(${s}) translate(-50%, -50%)`;
+  }
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((el, k) => el.classList.toggle('on', k === i));
+    document.getElementById('count').textContent = `${i + 1} / ${slides.length}`;
+    const a = slides[i].querySelector('aside');
+    notes.textContent = a ? a.textContent : '';
+    history.replaceState(null, '', '#' + (i + 1));
+  }
+  addEventListener('resize', fit);
+  addEventListener('keydown', e => {
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); show(i + 1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); show(i - 1); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key === 'n' || e.key === 'N') notes.classList.toggle('on');
+    else if (e.key === 'f' || e.key === 'F') toggleFull();
+  });
+  function toggleFull() { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); }
+  document.getElementById('prev').onclick = () => show(i - 1);
+  document.getElementById('next').onclick = () => show(i + 1);
+  document.getElementById('nbtn').onclick = () => notes.classList.toggle('on');
+  document.getElementById('fbtn').onclick = toggleFull;
+  let x0 = null;
+  addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 40) show(i + (dx < 0 ? 1 : -1)); x0 = null; });
+  fit(); show(i);
+</script>
+</body>
+</html>
