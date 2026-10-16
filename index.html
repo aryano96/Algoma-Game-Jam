@@ -1777,6 +1777,11 @@ function drawHUD() {
     const rules = [[['seed', 'sprout'], ['rabbit', 'cross']], [['sun', 'shade'], ['bucket', 'sprout']], [['fruit', 'seed'], ['axe', 'wood']], [['wood', 'fire'], ['wolf', 'fire']]][g.season];
     let rx = W / 2 - 120;
     rules.forEach(r => { drawIcon(r[0], rx + 16, 172, 22); ctx.fillStyle = '#fdf6e3'; ctx.font = 'bold 16px ' + FONT; ctx.fillText(r[1] === 'cross' ? '' : '→', rx + 44, 172); drawIcon(r[1], rx + (r[1] === 'cross' ? 16 : 72), 172, 22); rx += 140; });
+    // the goal, spelled out once at the start of a run
+    if (g.year === 1 && g.season === 0 && !g.endless) {
+      ctx.fillStyle = 'rgba(16,20,26,0.55)'; rr(W / 2 - 150, 206, 300, 36, 12); ctx.fill();
+      ctx.fillStyle = '#fdf6e3'; ctx.font = 'bold 17px ' + FONT; ctx.fillText('Survive ' + YEARS + ' winters to win', W / 2, 225);
+    }
     ctx.globalAlpha = 1;
   }
   // floats
