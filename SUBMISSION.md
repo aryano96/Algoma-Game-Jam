@@ -6,7 +6,7 @@
 
 | # | Deliverable | Status |
 |---|---|---|
-| 1 | Playable build, demonstrated live and playable by judges | Done: `index.html`, which runs offline in any browser. Play link: https://raw.githack.com/aryano96/Algoma-Game-Jam/main/index.html (backup: https://claude.ai/artifact/FnPmHve9MJkY951WdRUGky). |
+| 1 | Playable build, demonstrated live and playable by judges | Done: `index.html`, which runs offline in any browser. Play link: https://aryano96.github.io/Algoma-Game-Jam/ (backups: https://raw.githack.com/aryano96/Algoma-Game-Jam/main/index.html and https://claude.ai/artifact/FnPmHve9MJkY951WdRUGky). |
 | 2 | Pitch of up to 5 minutes, then 3 minutes of questions | Script ready in `PITCH.md`. **Your team needs to rehearse it.** |
 | 3 | Link to the code or project repository | Done: https://github.com/aryano96/Algoma-Game-Jam (paste this link into the submission form). |
 | 4 | List of third-party assets, tools and libraries, with credit | Done: see "Third-party assets, tools and libraries" in `README.md` (no third-party assets are used). |

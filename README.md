@@ -8,9 +8,9 @@ A Four Seasons game for the ThunderHacks 2026 Algoma Game Jam.
 
 ## Play it now
 
-**[▶ Play Perennial in your browser](https://raw.githack.com/aryano96/Algoma-Game-Jam/main/index.html)**: this runs the latest `index.html` from this repo, with nothing to install. It works on a laptop with a keyboard or gamepad, and on a phone or tablet with the touch controls.
+**[▶ Play Perennial in your browser](https://aryano96.github.io/Algoma-Game-Jam/)**: this is served by GitHub Pages from the latest `index.html` in this repo, with nothing to install. It works on a laptop with a keyboard or gamepad, and on a phone or tablet with the touch controls.
 
-Backup link: [hosted copy on Claude](https://claude.ai/artifact/FnPmHve9MJkY951WdRUGky).
+Backup links: [raw.githack copy](https://raw.githack.com/aryano96/Algoma-Game-Jam/main/index.html) and [hosted copy on Claude](https://claude.ai/artifact/FnPmHve9MJkY951WdRUGky).
 
 Found a bug or have an idea? Open an issue on this repo.
 
