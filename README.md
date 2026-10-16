@@ -6,6 +6,14 @@ A Four Seasons game for the ThunderHacks 2026 Algoma Game Jam.
 
 ![Title](screenshots/title.png)
 
+## Play it now
+
+**[▶ Play Perennial in your browser](https://raw.githack.com/aryano96/Algoma-Game-Jam/main/index.html)**: this runs the latest `index.html` from this repo, with nothing to install. It works on a laptop with a keyboard or gamepad, and on a phone or tablet with the touch controls.
+
+Backup link: [hosted copy on Claude](https://claude.ai/artifact/FnPmHve9MJkY951WdRUGky).
+
+Found a bug or have an idea? Open an issue on this repo.
+
 ## Run it
 
 Open `index.html` in any modern browser (Chrome, Edge, Firefox, Safari). That is the whole game: one file, no install, no server, no internet connection needed. Click the window once if the keyboard doesn't respond.
@@ -31,7 +39,7 @@ Walk over seeds, fruit and wood to pick them up. Survive **3 winters** to win; a
 |---|---|---|---|
 | **Spring** (rain) | Soil is soft. Seeds can only be planted now. The pond is full. | Plant seeds in the soil plots. | Rabbits come to eat your sprouts. Chase them off. |
 | **Summer** (heat) | The sun hurts you outside of shade. The pond shrinks. Sprouts dry out. | Carry water from the pond to your sprouts. Rest in tree shade or on the porch. | Heat stroke. Sprouts that dry out wither. |
-| **Fall** (wind) | Sprouts that survived become trees. Trees drop fruit, seeds and branches. Wind pushes you and blows loose fruit away. | Gather fruit (basket holds 6) and wood (arms hold 6). Collect seeds for next spring. Stock the fire. | Fruit left on the ground rots when winter comes. |
+| **Fall** (wind) | Sprouts that survived become trees. Trees drop fruit, seeds and branches. Wind pushes you and blows loose fruit away; fruit blown into the pond or off the map is lost. | Gather fruit (basket holds 6) and wood (arms hold 6). Collect seeds for next spring. Stock the fire. | Fruit left on the ground rots when winter comes. |
 | **Winter** (snow, night) | It's dark and you move slowly through snow. The fire burns fuel fast. Hunger is sharp. The pond freezes over (slippery). | Keep the hearth burning. Eat. Venture into the dark for deadwood, or chop one of your own trees. | Cold away from the fire light. Wolves in the dark. Standing on the ice when spring thaws drops you in. |
 
 ### The stray dog
@@ -43,13 +51,52 @@ Once adopted, the dog helps you in every season:
 - **Spring:** it chases rabbits away from your sprouts.
 - **Summer:** now and then it digs up a stick.
 - **Fall:** it fetches fruit from anywhere on the map, but only while your basket has room.
-- **Winter:** with a house, it walks with you into the dark and barks wolves away. Without a house, it shivers by the fire and can't help.
+- **Winter:** with a house, it walks with you into the dark and barks wolves away. Without a house, it shivers by the fire and can't help, and a small bubble over it shows that it needs a house.
 
 The dog and the rabbits walk around the pond, never through it. A rabbit going after your sprouts shows a red **!!** bubble.
+
+Once it has a house, the dog goes home when you do: whenever you're on the porch or by the fire, it trots over and naps in front of its house (unless it's busy chasing a rabbit or fetching fruit). Walk away and it gets up and follows you again.
 
 If you don't adopt it by the end of summer, it leaves, and it comes back next summer. Press the act key beside your dog when there's nothing else to do, and you'll pet it.
 
 ![The dog and its house](screenshots/dog.png)
+
+### The porch cat
+
+At the start of year 2, a white cat wanders in, hops up onto the red porch beam of the cabin and lies stretched out along it for the rest of the game. Its tail hangs over the edge and swings lazily. Now and then it opens its yellow eyes for a look around, then dozes off again. It wears a little red scarf in winter. Stand beside it and press the act key to pet it: it purrs and a **yellow heart** pops up. Petting the dog pops a **red heart**.
+
+![The porch cat](screenshots/cat.png)
+
+### The sun jar: carry summer into winter
+
+You start with an empty glass jar, shown at the right end of your item bar.
+
+- **Summer:** stand out in the sun and the jar fills over 8 seconds. A small jar above your head shows it filling. You're out of the shade the whole time, so the heat costs you health. Stepping into shade pauses it.
+- **Fall:** the full jar glows in your item bar and keeps until you use it. You hold one jar.
+- **Winter:** away from the fire, press the act key to open it. For 10 seconds a circle of summer moves with you: you stay warm, the dark lifts, and the snow melts under your feet so you walk at full speed. It doesn't stop wolves; that's the dog's job.
+
+Then the jar is empty until next summer. It turns the season itself into something you can store and spend, and it makes a long trip into the dark for wood possible.
+
+![Opening the sun jar in winter](screenshots/jar-winter.png)
+
+### Tree memories
+
+Each tree remembers the year you planted it. Stand close and you'll see it carved in the bark, like `Y1`. Chopped or burnt trees leave a stump with one ring for every year the tree lived. When a tree falls, a ghost of it in full summer leaf, with its shade, flashes over the stump for a moment, labelled with its year and rings. You see what you gave up.
+
+### Weather events in summer, fall and winter
+
+A red dot on the season wheel shows when the event will hit. A red **!!** warning appears 3 seconds before it starts, with a countdown and an alarm.
+
+| Season | Event | What you do |
+|---|---|---|
+| Summer | **Wildfire:** a spark lands on a grown tree, then embers jump to the nearest sprout every 4 seconds. At most one tree and two sprouts catch fire. A tree that burns for 8 seconds is lost. | Douse each fire with one splash from the bucket. Anything you douse is safe for the rest of the year. You can also water a tree before the fire hits (a red dot on the season wheel shows when) to keep it safe; a small blue drop marks it. |
+| Fall | **Gust:** 4 seconds of wind about twice the usual strength. Grown trees drop extra fruit, and loose fruit flies across the map. | Grab what you can, or let the dog fetch it. |
+| Winter | **Blizzard:** for 8 seconds the fire's light and your own lantern shrink, the cold bites harder, and a wolf comes in. | Huddle at the fire. |
+
+### Animals remember
+
+- **Rabbit:** in fall a hungry rabbit wanders in. Give it one spare fruit and it comes back next spring as a white guard rabbit with a red scarf, chasing wild rabbits off your sprouts. You have to feed it again each fall.
+- **Crow:** in fall a crow lands on a seed lying on the ground and pecks at it. Walk up and it flies off empty-beaked. Let it take the seed and it comes back early next spring to drop **two** seeds by your plots.
 
 ### The one idea
 
@@ -108,6 +155,6 @@ Tools used to make it: a text editor, a web browser, and Playwright with headles
 ## Files
 
 - `index.html`: the complete game
-- `screenshots/`: one screenshot per season, plus the title screen
+- `screenshots/`: one screenshot per season, the title screen, the dog, the weather events and the sun jar
 - `PITCH.md`: a 5-minute pitch script and likely judge questions
 - `SUBMISSION.md`: the deliverables checklist mapped to the brief and rubric

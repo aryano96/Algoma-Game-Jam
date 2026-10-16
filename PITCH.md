@@ -27,6 +27,7 @@ Press Enter.
 - Darkness, slow snow, fire light. Feed the fire.
 - Walk into the dark to grab glowing deadwood. A wolf howls. Run back to the light, where wolves won't follow.
 - If the dog has a house, let it bark a wolf away.
+- Walk away from the fire and open the sun jar you filled in summer. The dark turns gold around you. "This is summer in a jar. You paid for it with health in the heat, and now you can spend it on a trip into the dark."
 - Chop a tree: "This is the choice the whole game is built on. Three logs now, or shade and fruit next year."
 - If there's time, stand on the ice at the end of winter so the cracks show, then step off.
 
@@ -46,6 +47,6 @@ Press Enter.
 
 - **Why does the theme matter here?** Take the seasons away and there is no game. Planting, watering, harvesting and burning only make sense in that order, on a clock.
 - **How did you balance it?** We wrote a scripted bot that plays full games and ran it at every difficulty. Gentle is reliably winnable, while Normal and Hard punish players who don't use shade or who burn too many trees.
-- **What's original?** Most season games swap tilesets. Here, one object (the tree) changes meaning every season, and the strongest move in winter (burn it) is the weakest move for next year.
+- **What's original?** Most season games swap tilesets. Here, one object (the tree) changes meaning every season, and the strongest move in winter (burn it) is the weakest move for next year. The sun jar goes further: the season itself is a resource you store in summer and spend in winter.
 - **What would you add next?** Animals that migrate between seasons, a seasonal map that grows across years, and a two-player mode where one player is the gardener and one is the woodcutter.
 - **Was anything made by AI?** Answer honestly. Say it was built with an AI coding assistant if your team used one, and check whether the rules ask you to declare it.

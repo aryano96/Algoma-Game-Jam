@@ -37,10 +37,13 @@ const CABIN = { x0: 420, x1: 540, y0: 182, y1: 262 };
 const PORCH = { x0: 418, x1: 542, y0: 262, y1: 300 };
 const HEARTH = { x: 480, y: 336 };
 const KENNEL = { x: 594, y: 252, need: 4 }; // the dog house plot, east of the cabin
+const SUMMER_BONUS = 10; // summer lasts 10 seconds longer than the other seasons
+const CAT_SPOT = { x: 446, y: 292, perch: 258 }; // the cat walks to the porch, then hops up onto the red porch beam (top edge at y 258)
+const JAR = { fill: 8, open: 10, r: 95 }; // sun jar: seconds of sun to fill it, seconds of summer it holds, radius of its glow
 const DIFF = {
-  gentle: { season: 52, heat: 0.6, cold: 0.6, hunger: 0.65, wolves: 0.6, fruit: 1.35, burn: 0.75 },
-  normal: { season: 42, heat: 1.0, cold: 1.0, hunger: 1.0, wolves: 1.0, fruit: 1.0, burn: 1.0 },
-  hard:   { season: 36, heat: 1.3, cold: 1.25, hunger: 1.25, wolves: 1.45, fruit: 0.8, burn: 1.2 }
+  gentle: { season: 52, heat: 0.6, thirst: 0.6, cold: 0.6, hunger: 0.65, wolves: 0.6, fruit: 1.35, burn: 0.75 },
+  normal: { season: 42, heat: 1.0, thirst: 0.7, cold: 1.0, hunger: 1.0, wolves: 1.0, fruit: 1.0, burn: 1.0 },
+  hard:   { season: 36, heat: 1.3, thirst: 1.3, cold: 1.25, hunger: 1.25, wolves: 1.45, fruit: 0.8, burn: 1.2 }
 };
 
 // ---------------------------------------------------------------- utilities
@@ -289,6 +292,12 @@ const SFX = {
   bark() { tone('square', 520, 260, 0.07, 0.07); noise(0.07, 0.18, 'bandpass', 900, 2); tone('square', 560, 280, 0.07, 0.06, 0.12); noise(0.07, 0.15, 'bandpass', 950, 2, 0.12); },
   whine() { tone('sine', 900, 1300, 0.25, 0.05); tone('sine', 1300, 800, 0.3, 0.04, 0.25); },
   build() { for (let i = 0; i < 3; i++) noise(0.05, 0.25, 'bandpass', 1800, 3, i * 0.11); tone('triangle', 330, 0, 0.12, 0.08, 0.35); },
+  warn() { tone('square', 880, 0, 0.09, 0.06); tone('square', 880, 0, 0.09, 0.06, 0.16); tone('square', 1175, 0, 0.14, 0.06, 0.32); },
+  caw() { tone('sawtooth', 760, 480, 0.16, 0.06); noise(0.14, 0.12, 'bandpass', 1300, 4); tone('sawtooth', 700, 440, 0.14, 0.05, 0.22); },
+  jar() { [72, 76, 79, 84].forEach((n, i) => tone('triangle', mtof(n), 0, 0.5, 0.06, i * 0.07)); tone('sine', mtof(96), 0, 0.8, 0.03, 0.3); },
+  purr() { if (!A.ctx) return; for (let i = 0; i < 6; i++) noise(0.09, 0.16, 'lowpass', 160, 2, i * 0.12); tone('sine', 70, 60, 0.8, 0.05); },
+  plop() { tone('sine', 520, 180, 0.14, 0.07); noise(0.12, 0.08, 'bandpass', 900, 2, 0.02); },
+  memory() { [79, 76, 72, 67].forEach((n, i) => tone('sine', mtof(n), 0, 0.6, 0.05, 0.1 + i * 0.14)); },
   lose() { [12, 7, 3, 0].forEach((n, i) => tone('triangle', mtof(57 + n), 0, 0.7, 0.08, i * 0.25)); }
 };
 
@@ -370,21 +379,23 @@ function plotList() {
   P.push({ x: 318, y: 186, elder: true });
   P.push({ x: 300, y: 470 });
   P.push({ x: 380, y: 470 });
+  P.push({ x: 352, y: 284 });
   return P.map(p => ({ x: p.x, y: p.y, elder: !!p.elder, state: 'empty', age: 0, growth: 0, thirst: 1, hits: 0, shake: 0,
-    fruitT: rand(1, 4), branchT: rand(5, 12), seedsLeft: 0, seedT: 0, nibble: 0 }));
+    fruitT: rand(1, 4), branchT: rand(5, 12), seedsLeft: 0, seedT: 0, nibble: 0, planted: 0, rings: 0, burn: 0, spreadT: 0,
+    wet: dist(p.x, p.y, POND.x, POND.y) < 240 }));
 }
 function newGame(demo) {
   const plots = plotList();
-  const tree = (i, age) => { plots[i].state = 'tree'; plots[i].age = age; plots[i].growth = 1; };
+  const tree = (i, age) => { plots[i].state = 'tree'; plots[i].age = age; plots[i].growth = 1; plots[i].planted = 1 - age; plots[i].wild = true; };
   tree(12, 6); tree(4, 2); tree(9, 2);
   if (demo) { tree(0, 2); tree(7, 1); tree(11, 2); tree(14, 1); plots[2].state = 'sprout'; plots[5].state = 'sprout'; }
   const G = {
     demo: !!demo, year: 1, season: 0, prevSeason: 3, t: 0, len: D().season,
-    player: { x: 480, y: 408, vx: 0, vy: 0, face: 1, hp: 100, seeds: 0, fruit: 2, wood: 0, bucket: 0, walk: 0, hurtT: 0, chopCD: 0, moved: 0, onIce: false, inShade: false, warm: false, drain: '' },
+    player: { x: 480, y: 408, vx: 0, vy: 0, face: 1, hp: 100, seeds: 0, fruit: 2, wood: 0, bucket: 0, jar: 0, walk: 0, hurtT: 0, chopCD: 0, moved: 0, onIce: false, inShade: false, warm: false, drain: '' },
     plots, items: [], rabbits: [], wolves: [], parts: [], floats: [], weather: [],
     fuel: 100, pond: 1, wind: { x: 0, y: 0, a: 0, s: 0, ta: 0, ts: 0, timer: 0 },
-    spawn: { rabbit: 12, wolf: 7, wood: 4, twig: 10 }, stats: { fruit: 0, seeds: 0, planted: 0, rabbits: 0, wolves: 0, wood: 0, years: 0 },
-    dog: null, kennel: { wood: 0, built: false },
+    spawn: { rabbit: 12, wolf: 7, wood: 4, twig: 10 }, stats: { jars: 0, doused: 0, fed: 0, gifts: 0, crows: 0, fruit: 0, seeds: 0, planted: 0, rabbits: 0, wolves: 0, wood: 0, years: 0 },
+    dog: null, kennel: { wood: 0, built: false }, ev: null, ghosts: [], bunny: null, bunnyFriend: false, crow: null, crowT: 10, crowDebt: 0, sun: 0, cat: null,
     banner: 0, shake: 0, flash: 0, cause: '', endless: false, lastTick: -1, crackT: 0, deadT: 0
   };
   if (!demo) {
@@ -429,7 +440,7 @@ function steerAroundPond(o, tx, ty) {
   return { x: POND.x + Math.cos(a) * (R.rx + 12), y: POND.y + Math.sin(a) * (R.ry + 12) };
 }
 function inPond(x, y) { return inPondShape(x, y, g.pond); }
-function lightRadius() { return g.fuel > 0 ? 70 + 150 * Math.sqrt(g.fuel / 100) : 0; }
+function lightRadius() { return g.fuel > 0 ? (70 + 150 * Math.sqrt(g.fuel / 100)) * (evActive('blizzard') ? 0.55 : 1) : 0; }
 function yearScale() { return 1 + 0.2 * (g.year - 1); }
 
 // =====================================================================
@@ -437,9 +448,16 @@ function yearScale() { return 1 + 0.2 * (g.year - 1); }
 // =====================================================================
 function enterSeason(s) {
   const p = g.player;
-  g.prevSeason = g.season; g.season = s; g.t = 0; g.len = D().season; g.banner = 3.2; g.lastTick = -1;
+  g.prevSeason = g.season; g.season = s; g.t = 0; g.len = D().season + (s === 1 ? SUMMER_BONUS : 0); g.banner = 3.2; g.lastTick = -1;
   if (!g.demo) { SFX.chime(s); }
   setAmbience(s);
+  // every season brings one weather event, announced on the season wheel
+  g.ev = g.demo || !EVENTS[s] ? null : { type: EVENTS[s], at: g.len * rand(0.38, 0.62), state: 'pending', t: 0, dur: [8, 12, 4.5, 8][s], dir: rand(0, 6.28) };
+  g.plots.forEach(pl => pl.burn = 0);
+  if (g.bunny && g.bunny.state !== 'leave') g.bunny.state = 'leave';
+  if (g.crow && g.crow.state !== 'leave') g.crow.state = 'leave';
+  g.crowT = s === 0 ? 4 : rand(8, 12);
+  g.bunnyT = rand(5, 9);
   if (s === 0) {
     // the thaw: anyone standing on the pond goes through the ice
     if (!g.demo && inPondShape(p.x, p.y, g.pond)) {
@@ -450,6 +468,10 @@ function enterSeason(s) {
     g.plots.forEach(pl => { if (pl.state === 'stump' || pl.state === 'dead') { pl.state = 'empty'; } if (pl.state === 'tree') pl.age++; });
     g.wolves.forEach(w => w.state = 'leave');
     g.spawn.rabbit = g.year === 1 ? 12 : 5;
+    // a rabbit you fed last fall comes back as a guard
+    // from year 2 a cat wanders in and makes the porch its home
+    if (g.year >= 2 && !g.cat && !g.demo) { const side = Math.random() < 0.5 ? -1 : 1; g.cat = { x: side < 0 ? -20 : W + 20, y: rand(380, 470), state: 'arrive', face: -side, walk: 0, t: 0, eyes: 3, open: false, hop: 0 }; }
+    if (g.bunnyFriend && !g.demo) { const e = edgePoint(); g.bunny = { x: e.x, y: e.y, state: 'guard', hop: 0, face: 1, ex: e.x, ey: e.y, t: 0 }; g.bunnyFriend = false; }
   }
   if (s === 1) {
     g.plots.forEach(pl => { if (pl.state === 'sprout') pl.thirst = 1; });
@@ -481,7 +503,7 @@ function endOfYear() {
 function finish(won) {
   const s = g.stats, trees = g.plots.filter(p => p.state === 'tree').length;
   s.trees = trees;
-  s.score = Math.round(s.years * 100 + trees * 25 + s.fruit * 4 + s.planted * 10 + s.rabbits * 5 + s.wolves * 5 + Math.max(0, g.player.hp) * (won ? 1 : 0) + (s.dog ? 40 : 0) + (s.kennel ? 60 : 0));
+  s.score = Math.round(s.years * 100 + trees * 25 + s.fruit * 4 + s.planted * 10 + s.rabbits * 5 + s.wolves * 5 + Math.max(0, g.player.hp) * (won ? 1 : 0) + (s.dog ? 40 : 0) + (s.kennel ? 60 : 0) + s.fed * 15 + s.gifts * 5 + s.doused * 10 + s.jars * 10);
   s.best = s.score > best; if (s.best) { best = s.score; store('perennial.best', best); }
   setState(won ? 'win' : 'over');
   won ? SFX.win() : SFX.lose();
@@ -505,6 +527,7 @@ function update(dt) {
   g.flash = Math.max(0, g.flash - dt);
   g.shake = Math.max(0, g.shake - dt * 20);
   p.hurtT = Math.max(0, p.hurtT - dt); p.chopCD = Math.max(0, p.chopCD - dt);
+  g.sun = Math.max(0, g.sun - dt);
 
   // last seconds of a season tick down
   const left = g.len - g.t;
@@ -521,7 +544,7 @@ function update(dt) {
   let speed = 150;
   const wading = s !== 3 && inPond(p.x, p.y);
   p.onIce = s === 3 && inPond(p.x, p.y);
-  if (s === 3 && !p.onIce) speed *= dist(p.x, p.y, HEARTH.x, HEARTH.y) < 70 ? 0.85 : 0.62;
+  if (s === 3 && !p.onIce && g.sun <= 0) speed *= dist(p.x, p.y, HEARTH.x, HEARTH.y) < 70 ? 0.85 : 0.62;
   if (wading) speed *= 0.5;
   if (p.onIce) { p.vx = lerp(p.vx, ix * 175, dt * 1.6); p.vy = lerp(p.vy, iy * 175, dt * 1.6); }
   else { p.vx = ix * speed; p.vy = iy * speed; }
@@ -558,7 +581,7 @@ function update(dt) {
   if (s === 1) updateSummer(dt, d, ys);
   if (s === 2) updateFall(dt, d, ys);
   if (s === 3) updateWinter(dt, d, ys);
-  updateRabbits(dt); updateWolves(dt); updateDog(dt);
+  updateRabbits(dt); updateWolves(dt); updateDog(dt); updateCat(dt); updateEvent(dt); updateCritters(dt);
 
   // ---------------- items
   for (let i = g.items.length - 1; i >= 0; i--) {
@@ -567,6 +590,10 @@ function update(dt) {
     if (s === 2 && it.type !== 'wood' && it.z < 2) { it.vx += g.wind.x * (it.type === 'fruit' ? 70 : 110) * dt; it.vy += g.wind.y * (it.type === 'fruit' ? 70 : 110) * dt; }
     it.vx *= 1 - Math.min(1, dt * 2.2); it.vy *= 1 - Math.min(1, dt * 2.2);
     it.x += it.vx * dt; it.y += it.vy * dt;
+    // fruit and seeds blown into the pond sink and are lost, just like ones blown off the edge of the map
+    if ((it.vx || it.vy) && it.type !== 'wood' && it.z < 2 && s !== 3 && inPondShape(it.x, it.y, g.pond * 0.95)) {
+      burst(it.x, it.y, PAL[0].water2, 8); SFX.plop(); g.items.splice(i, 1); continue;
+    }
     if (it.x < PLAY.x0 - 4 || it.x > PLAY.x1 + 4 || it.y < PLAY.y0 - 4 || it.y > PLAY.y1 + 4) {
       burst(clamp(it.x, 10, W - 10), clamp(it.y, 10, H - 10), it.type === 'fruit' ? UIC().fruit : '#8a5a2b', 6); g.items.splice(i, 1);
     }
@@ -589,6 +616,7 @@ function updateSpring(dt, d, ys) {
   const sprouts = g.plots.filter(pl => pl.state === 'sprout');
   if (g.spawn.rabbit <= 0) {
     g.spawn.rabbit = (g.year === 1 ? 9 : 6) / (d.wolves * ys) * rand(0.8, 1.2);
+    if (g.bunny && g.bunny.state === 'guard') g.spawn.rabbit *= 1.6;
     if (sprouts.length && g.rabbits.length < 2 + g.year) {
       const e = edgePoint(); g.rabbits.push({ x: e.x, y: e.y, state: 'seek', hop: 0, target: null, t: 0, face: 1 });
     }
@@ -631,11 +659,13 @@ function updateSummer(dt, d, ys) {
   const pulse = 0.8 + 0.35 * Math.sin(g.t * 0.6);
   p.inShade = inShade(p.x, p.y) || inPond(p.x, p.y);
   if (!p.inShade) { p.hp -= 2.6 * d.heat * ys * pulse * dt; p.drain = 'heat'; if (p.hp <= 0) g.cause = 'heat'; }
+  // the sun jar fills while you stand out in the sun
+  if (!p.inShade && p.jar < 1) { p.jar = Math.min(1, p.jar + dt / JAR.fill); if (p.jar >= 1) { SFX.jar(); burst(p.x, p.y - 40, '#ffd24a', 14); floatText(p.x, p.y - 50, 'jar', '!'); } }
   else p.hp += 0.6 * dt;
   g.plots.forEach(pl => {
     if (pl.state === 'sprout') {
       pl.growth = Math.min(1, pl.growth + dt / 25);
-      pl.thirst -= dt / (13.5 / Math.sqrt(ys)) * d.heat;
+      pl.thirst -= dt / (13.5 / Math.sqrt(ys)) * d.thirst * (pl.wet ? 0.5 : 1);
       if (pl.thirst <= 0) { pl.state = 'dead'; SFX.wither(); burst(pl.x, pl.y, '#b59a52', 10); }
     }
   });
@@ -646,7 +676,8 @@ function updateFall(dt, d, ys) {
   w.timer -= dt;
   if (w.timer <= 0) { w.timer = rand(5, 8); w.ta = rand(0, Math.PI * 2); w.ts = rand(0.35, 1) * Math.min(1.4, ys); }
   w.a += Math.atan2(Math.sin(w.ta - w.a), Math.cos(w.ta - w.a)) * Math.min(1, dt * 0.8);
-  w.s = lerp(w.s, w.ts * (0.7 + 0.3 * Math.sin(g.t * 2.3)), Math.min(1, dt * 1.5));
+  if (evActive('gust')) { w.ta = g.ev.dir; w.ts = 2.1; w.timer = 1; }
+  w.s = lerp(w.s, w.ts * (0.7 + 0.3 * Math.sin(g.t * 2.3)), Math.min(1, dt * (evActive('gust') ? 4 : 1.5)));
   w.x = Math.cos(w.a) * w.s; w.y = Math.sin(w.a) * w.s;
   g.plots.forEach(pl => {
     if (pl.state !== 'tree') return;
@@ -671,7 +702,7 @@ function updateWinter(dt, d, ys) {
   p.warm = g.fuel > 0 && dist(p.x, p.y, HEARTH.x, HEARTH.y) < lr * 0.85;
   p.hp -= 1.0 * d.hunger * ys * dt; p.drain = 'hunger';
   if (p.hp <= 0) g.cause = 'hunger';
-  if (!p.warm) { p.hp -= 3.6 * d.cold * ys * dt; p.drain = 'cold'; if (p.hp <= 0) g.cause = 'cold'; }
+  if (!p.warm && g.sun <= 0) { p.hp -= 3.6 * d.cold * ys * (evActive('blizzard') ? 1.35 : 1) * dt; p.drain = 'cold'; if (p.hp <= 0) g.cause = 'cold'; }
   // thaw warning: cracks under your feet near the end of winter
   if (p.onIce && g.len - g.t < 5) { g.crackT -= dt; if (g.crackT <= 0) { g.crackT = 0.7; SFX.crack(); } }
   // deadwood appears out in the dark
@@ -748,8 +779,12 @@ function updateDog(dt) {
     if (d.x < -30 || d.x > W + 30) { g.dog = null; g.dogT = undefined; return; }
   } else {
     const winterHome = s === 3 && !g.kennel.built;
+    // when you're home (on the porch or by the fire), a dog with a house goes and naps in front of it
+    const atHome = g.kennel.built && p.x > CABIN.x0 - 30 && p.x < CABIN.x1 + 30 && p.y > CABIN.y1 - 10 && p.y < HEARTH.y + 45;
+    d.rest = false;
     const rab = s === 0 ? nearest(g.rabbits.filter(r => r.state !== 'flee' && dist(r.x, r.y, d.x, d.y) < 240), d.x, d.y) : null;
-    if (winterHome) { tx = HEARTH.x + 30; ty = HEARTH.y + 14; sp = 120; }
+    // a fruit still in its mouth when winter comes gets delivered first
+    if (winterHome && !d.carry) { tx = HEARTH.x + 30; ty = HEARTH.y + 14; sp = 120; }
     else if (d.dig > 0) { d.dig -= dt; if (d.dig <= 0) { const it = makeItem('wood', d.x + d.face * 10, d.y + 4, 14); it.vz = 70; g.items.push(it); SFX.bark(); } }
     else if (rab) {
       tx = rab.x; ty = rab.y; sp = 200;
@@ -757,6 +792,7 @@ function updateDog(dt) {
     } else if (s === 2 && !d.carry) {
       const fr = p.fruit < CAP ? nearest(g.items.filter(i => i.type === 'fruit' && i.z < 3 && !inPondRim(i.x, i.y) && dist(i.x, i.y, p.x, p.y) > 30), d.x, d.y) : null;
       if (fr) { tx = fr.x; ty = fr.y; sp = 170; if (dist(d.x, d.y, fr.x, fr.y) < 14) { g.items.splice(g.items.indexOf(fr), 1); d.carry = 'fruit'; } }
+      else if (atHome) { tx = KENNEL.x; ty = KENNEL.y + 24; sp = 110; if (dist(d.x, d.y, tx, ty) < 4) { d.rest = true; d.face = -1; sp = 0; } }
       else { tx = p.x - p.face * 28; ty = p.y + 8; sp = pd > 50 ? 165 : pd > 30 ? 80 : 0; }
     } else if (d.carry) {
       tx = p.x; ty = p.y + 6; sp = 175;
@@ -765,6 +801,9 @@ function updateDog(dt) {
         else g.items.push(makeItem('fruit', d.x, d.y + 4));
         d.carry = null; d.wag = 0;
       }
+    } else if (atHome) {
+      tx = KENNEL.x; ty = KENNEL.y + 24; sp = 110;
+      if (dist(d.x, d.y, tx, ty) < 4) { d.rest = true; d.face = -1; sp = 0; }
     } else {
       tx = p.x - p.face * 28; ty = p.y + 8; sp = pd > 50 ? (s === 3 ? 140 : 165) : pd > 30 ? 80 : 0;
       // summer: now and then it digs up a stick
@@ -785,6 +824,142 @@ function updateDog(dt) {
   } else if (d.state !== 'leave') d.sit = true;
   if (d.state === 'friend' || d.state === 'stray') collide(d, 7);
   pushOutOfPond(d);
+}
+// ---------------------------------------------------------------- the porch cat
+// Turns up at the start of year 2, walks to the porch and naps there for good, swinging its tail.
+function updateCat(dt) {
+  const c = g.cat; if (!c) return;
+  c.t += dt; c.pet = Math.max(0, (c.pet || 0) - dt);
+  // now and then it opens its yellow eyes for a look around, then dozes off again
+  c.eyes -= dt; if (c.eyes <= 0) { c.open = !c.open; c.eyes = c.open ? rand(1.5, 3) : rand(3, 6); }
+  if (c.state === 'arrive') {
+    const wp = steerAroundPond(c, CAT_SPOT.x, CAT_SPOT.y), dd = dist(c.x, c.y, wp.x, wp.y);
+    if (dist(c.x, c.y, CAT_SPOT.x, CAT_SPOT.y) < 3) { c.state = 'hop'; c.hop = 0; c.face = 1; return; }
+    const step = Math.min(dd, 55 * dt); c.x += (wp.x - c.x) / Math.max(1, dd) * step; c.y += (wp.y - c.y) / Math.max(1, dd) * step; c.walk += dt * 10;
+    if (Math.abs(wp.x - c.x) > 1) c.face = wp.x > c.x ? 1 : -1;
+    if (c.y < CABIN.y1 + 22 && c.x > CABIN.x0 - 10 && c.x < CABIN.x1 + 10) c.y = CABIN.y1 + 22; pushOutOfPond(c);
+  } else if (c.state === 'hop') {
+    c.hop += dt / 0.45; if (c.hop >= 1) { c.state = 'rest'; c.y = CABIN.y1 + 2; c.open = false; c.eyes = 3; }
+  }
+}
+// ---------------------------------------------------------------- seasonal weather events
+const EVENTS = [null, 'fire', 'gust', 'blizzard']; // spring has no weather event
+const EVENT_ICON = { fire: 'fire', gust: 'wind', blizzard: 'snow' };
+function evActive(type) { return g && g.ev && g.ev.type === type && g.ev.state === 'active'; }
+function updateEvent(dt) {
+  const e = g.ev, p = g.player;
+  if (e) {
+    if (e.state === 'pending' && g.t >= e.at - 3) { e.state = 'warn'; SFX.warn(); }
+    if (e.state === 'warn' && g.t >= e.at) { e.state = 'active'; e.t = 0; startEvent(e); }
+    if (e.state === 'active') { e.t += dt; if (e.t >= e.dur) e.state = 'done'; }
+  }
+  // fire: every 4 seconds an ember jumps from a burning plant to the next one, at most one tree and two sprouts in all
+  if (e && e.type === 'fire' && e.left && (e.left.tree + e.left.sprout) > 0) {
+    const burning = g.plots.filter(q => q.burn > 0);
+    if (burning.length) { e.spreadT -= dt; if (e.spreadT <= 0) { e.spreadT = 4; igniteNext(e, e.last && e.last.burn ? e.last : burning[0]); } }
+  }
+  g.plots.forEach(pl => {
+    if (!pl.burn) return;
+    pl.burn += dt;
+    if (dist(p.x, p.y, pl.x, pl.y) < 22) { p.hp -= 7 * dt; p.drain = 'heat'; if (p.hp <= 0) g.cause = 'heat'; }
+    if (pl.burn > 8) {
+      burst(pl.x, pl.y - 16, '#3a3a3a', 16);
+      if (pl.state === 'tree') fell(pl, true); else pl.state = 'empty';
+      pl.burn = 0;
+    }
+  });
+}
+// A grown tree or sprout can catch fire unless you've watered it this year (a watered tree, or anything you doused, is safe until next year)
+function burnable(q, e) { return !q.burn && !q.elder && q.safe !== g.year && ((q.state === 'tree' && e.left.tree > 0) || (q.state === 'sprout' && e.left.sprout > 0)); }
+function igniteNext(e, from) {
+  const pool = g.plots.filter(q => burnable(q, e));
+  if (!pool.length) return;
+  // the first spark goes for a grown tree when there is one; after that embers jump to the nearest plant
+  const trees = pool.filter(q => q.state === 'tree'), grown = trees.filter(q => q.age >= 1);
+  const pl = from ? nearest(pool, from.x, from.y) : pick(grown.length ? grown : trees.length ? trees : pool);
+  pl.burn = 0.01; e.left[pl.state]--; e.last = pl;
+  SFX.fire(); burst(pl.x, pl.y - (pl.state === 'tree' ? 40 : 10), '#ffb347', 14);
+  if (from) for (let i = 0; i < 6; i++) g.parts.push({ x: lerp(from.x, pl.x, i / 6), y: lerp(from.y, pl.y, i / 6) - 30 - Math.sin(i / 6 * Math.PI) * 30, vx: rand(-10, 10), vy: rand(-20, 0), life: 0.5 + i * 0.08, max: 1, col: '#ffb347', r: 2.5 });
+}
+function startEvent(e) {
+  const p = g.player;
+  if (e.type === 'fire') { e.left = { tree: 1, sprout: 2 }; e.spreadT = 4; igniteNext(e, null); }
+  if (e.type === 'gust') {
+    g.wind.a = e.dir; g.wind.ta = e.dir; SFX.fell();
+    // the gust shakes fruit loose from every grown tree
+    g.plots.forEach(pl => { if (pl.state === 'tree' && pl.age >= 1) for (let i = 0; i < 1; i++) g.items.push(makeItem('fruit', pl.x + rand(-26, 26), pl.y + rand(-4, 14), 34)); });
+  }
+  if (e.type === 'blizzard') {
+    SFX.howl(); noise(1.5, 0.25, 'bandpass', 500, 3, 0, 300);
+    if (g.wolves.length < 2 + g.year) { const w = edgePoint(); g.wolves.push({ x: w.x, y: w.y, state: 'hunt', t: 0, life: rand(14, 18), rt: 0, face: 1, step: 0, ex: w.x, ey: w.y }); }
+  }
+}
+// ---------------------------------------------------------------- tree memories
+function fell(pl, burnt) {
+  pl.rings = Math.max(1, g.year - pl.planted + 1);
+  g.ghosts.push({ x: pl.x, y: pl.y, sz: pl.elder ? 1.45 : 0.72 + 0.28 * Math.min(1, pl.age / 2 + 0.3), shade: pl.elder ? 62 : 30 + 16 * Math.min(1, pl.age + 0.5), tag: pl.wild ? '' : 'Y' + pl.planted, rings: pl.rings, t: 0 });
+  pl.state = 'stump'; pl.hits = 0;
+  SFX.memory();
+}
+// ---------------------------------------------------------------- animals that remember
+function updateCritters(dt) {
+  const p = g.player, s = g.season;
+  for (let i = g.ghosts.length - 1; i >= 0; i--) { g.ghosts[i].t += dt; if (g.ghosts[i].t > 2.2) g.ghosts.splice(i, 1); }
+  // fall: a hungry rabbit hopes for a spare fruit
+  if (s === 2 && !g.bunny && !g.bunnyFriend && !g.demo) {
+    g.bunnyT -= dt;
+    if (g.bunnyT <= 0 && g.len - g.t > 14) { const e = edgePoint(); g.bunny = { x: e.x, y: e.y, state: 'hungry', hop: 0, face: 1, ex: e.x, ey: e.y, tx: rand(420, 760), ty: rand(380, 470), t: 0, wt: 0 }; }
+  }
+  const b = g.bunny;
+  if (b) {
+    b.t += dt; b.hop += dt * 8;
+    let tx = b.x, ty = b.y, sp = 0;
+    if (b.state === 'hungry') {
+      b.wt -= dt; if (b.wt <= 0) { b.wt = rand(3, 5); b.tx = clamp(b.x + rand(-120, 120), 380, 880); b.ty = clamp(b.y + rand(-60, 60), 140, 480); }
+      if (dist(p.x, p.y, b.x, b.y) > 60) { tx = b.tx; ty = b.ty; sp = 50; } else b.face = p.x > b.x ? 1 : -1;
+    } else if (b.state === 'fed') { b.wt -= dt; if (b.wt <= 0) b.state = 'leave'; }
+    else if (b.state === 'guard') {
+      const wild = nearest(g.rabbits.filter(r => r.state !== 'flee'), b.x, b.y);
+      if (wild) { tx = wild.x; ty = wild.y; sp = 150; if (dist(b.x, b.y, wild.x, wild.y) < 28) { wild.state = 'flee'; if (wild.target) wild.target.nibble = 0; g.stats.rabbits++; SFX.squeak(); floatText(b.x, b.y - 26, 'heart', ''); } }
+      else { const c = nearest(g.plots.filter(q => q.state === 'sprout'), b.x, b.y) || { x: 760, y: 304 }; tx = c.x - 26; ty = c.y + 16; sp = dist(b.x, b.y, tx, ty) > 20 ? 90 : 0; }
+    } else { tx = b.ex; ty = b.ey; sp = 140; if (dist(b.x, b.y, tx, ty) < 10) { g.bunny = null; } }
+    if (g.bunny && sp > 0) {
+      const wp = b.state === 'leave' ? { x: tx, y: ty } : steerAroundPond(b, tx, ty), dd = dist(b.x, b.y, wp.x, wp.y);
+      if (dd > 2) { const k = sp * (Math.sin(b.hop) > 0 ? 1.5 : 0.4) * dt; b.x += (wp.x - b.x) / dd * Math.min(dd, k); b.y += (wp.y - b.y) / dd * Math.min(dd, k); if (Math.abs(wp.x - b.x) > 1) b.face = wp.x > b.x ? 1 : -1; }
+      if (b.state !== 'leave') pushOutOfPond(b);
+    }
+  }
+  // fall: a crow drops in to steal a seed. Let it, and it brings two back in spring.
+  if (!g.crow && !g.demo) {
+    g.crowT -= dt;
+    const seeds = g.items.filter(i => i.type === 'seed' && i.z < 3);
+    if (g.crowT <= 0) {
+      g.crowT = rand(10, 15);
+      if (s === 2 && seeds.length && g.len - g.t > 8) { const t = nearest(seeds, rand(100, 860), 80); g.crow = { x: t.x + rand(-200, 200), y: -30, z: 60, state: 'fly', target: t, t: 0, face: 1, flap: 0, peck: 0 }; SFX.caw(); }
+      if (s === 0 && g.crowDebt > 0 && g.t < g.len - 8) { g.crow = { x: rand(200, 760), y: -30, z: 60, state: 'gift', gx: rand(560, 720), gy: rand(370, 460), gifts: g.crowDebt * 2, t: 0, face: 1, flap: 0 }; g.crowDebt = 0; SFX.caw(); }
+    }
+  }
+  const c = g.crow;
+  if (c) {
+    c.t += dt; c.flap += dt * 14;
+    const fly = (tx, ty, sp) => { const dd = dist(c.x, c.y, tx, ty); if (dd > 2) { const k = Math.min(dd, sp * dt); c.x += (tx - c.x) / dd * k; c.y += (ty - c.y) / dd * k; c.face = tx > c.x ? 1 : -1; } return dd; };
+    if (c.state === 'fly') {
+      if (!g.items.includes(c.target)) { const n = nearest(g.items.filter(i => i.type === 'seed' && i.z < 3), c.x, c.y); if (n) c.target = n; else c.state = 'leave'; }
+      if (c.state === 'fly') { const dd = fly(c.target.x - 8, c.target.y, 170); c.z = Math.min(60, dd * 0.4); if (dd < 4) { c.state = 'peck'; c.peck = 0; c.z = 0; } }
+    } else if (c.state === 'peck') {
+      c.peck += dt;
+      if (!g.items.includes(c.target)) c.state = 'fly';
+      else if (c.peck > 2.6) { g.items.splice(g.items.indexOf(c.target), 1); c.carry = true; c.state = 'leave'; g.crowDebt = Math.min(2, g.crowDebt + 1); SFX.caw(); }
+    } else if (c.state === 'gift') {
+      const dd = fly(c.gx, c.gy, 160); c.z = Math.max(26, Math.min(60, dd * 0.3));
+      if (dd < 4) { for (let i = 0; i < c.gifts; i++) { const it = makeItem('seed', c.gx + rand(-24, 24), c.gy + rand(-10, 14), 26); g.items.push(it); } g.stats.gifts += c.gifts; SFX.caw(); SFX.pickup(); floatText(c.gx, c.gy - 40, 'seed', '+' + c.gifts); c.state = 'leave'; }
+    } else {
+      c.z = Math.min(70, c.z + dt * 80); fly(c.x + (c.face || 1) * 400, -60, 190);
+      if (c.y < -40 || c.x < -40 || c.x > W + 40) g.crow = null;
+    }
+    // walking up to a landed crow scares it off before it gets the seed
+    if (g.crow && (c.state === 'peck' || (c.state === 'fly' && c.z < 20)) && dist(p.x, p.y, c.x, c.y) < 46) { c.state = 'leave'; c.carry = false; g.stats.crows++; SFX.caw(); }
+  }
 }
 function spawnTwigs(dt, force) {
   g.spawn.twig -= dt;
@@ -842,10 +1017,14 @@ function collide(o, r) {
 function bestAction() {
   const p = g.player, s = g.season;
   const near = (x, y, r) => dist(p.x, p.y, x, y) < r;
+  const fire = nearest(g.plots.filter(q => q.burn > 0 && near(q.x, q.y, 46)), p.x, p.y);
+  if (fire && p.bucket > 0) return { type: 'douse', plot: fire, x: fire.x, y: fire.y - (fire.state === 'tree' ? 74 : 30), icon: 'drop' };
+  if (g.bunny && g.bunny.state === 'hungry' && p.fruit > 0 && near(g.bunny.x, g.bunny.y, 44)) return { type: 'feedbunny', x: g.bunny.x, y: g.bunny.y - 30, icon: 'fruit' };
   if (p.wood > 0 && g.fuel < 96 && near(HEARTH.x, HEARTH.y, 58)) return { type: 'feed', x: HEARTH.x, y: HEARTH.y - 26, icon: 'fire' };
   let target = null, bd = 40;
-  if (s === 1 && p.bucket > 0) g.plots.forEach(pl => { if (pl.state === 'sprout' && pl.thirst < 0.93) { const dd = dist(p.x, p.y, pl.x, pl.y); if (dd < bd) { bd = dd; target = pl; } } });
-  if (target) return { type: 'water', plot: target, x: target.x, y: target.y - 26, icon: 'drop' };
+  const fireDue = g.ev && g.ev.type === 'fire' && g.ev.state !== 'done';
+  if (s === 1 && p.bucket > 0) g.plots.forEach(pl => { if ((pl.state === 'sprout' && pl.thirst < 0.93) || (fireDue && pl.state === 'tree' && !pl.elder && pl.safe !== g.year && !pl.burn)) { const dd = dist(p.x, p.y, pl.x, pl.y); if (dd < bd) { bd = dd; target = pl; } } });
+  if (target) return { type: 'water', plot: target, x: target.x, y: target.y - (target.state === 'tree' ? 74 : 26), icon: 'drop' };
   bd = 36;
   if (p.seeds > 0) g.plots.forEach(pl => { if (pl.state === 'empty') { const dd = dist(p.x, p.y, pl.x, pl.y); if (dd < bd) { bd = dd; target = pl; } } });
   if (target) return s === 0 ? { type: 'plant', plot: target, x: target.x, y: target.y - 22, icon: 'sprout' } : { type: 'noplant', plot: target, x: target.x, y: target.y - 22, icon: 'sprout', no: true };
@@ -855,15 +1034,22 @@ function bestAction() {
   if (target) return { type: 'chop', plot: target, x: target.x, y: target.y - (target.state === 'tree' ? 70 : 24), icon: 'axe' };
   if (g.dog && g.dog.state === 'stray' && near(g.dog.x, g.dog.y, 46)) return { type: 'adopt', x: g.dog.x, y: g.dog.y - 34, icon: 'heart' };
   if (g.dog && g.dog.state === 'friend' && !g.kennel.built && p.wood > 0 && near(KENNEL.x, KENNEL.y, 46)) return { type: 'build', x: KENNEL.x, y: KENNEL.y - 40, icon: 'house' };
+  if (s === 3 && p.jar >= 1 && g.sun <= 0 && !p.warm) return { type: 'jar', x: p.x, y: p.y - 46, icon: 'jar' };
   return null;
 }
 function doAction() {
   const p = g.player, a = bestAction();
   if (!a) {
-    const d = g.dog; // nothing to do: pet the dog if it's beside you
-    if (d && d.state === 'friend' && dist(p.x, p.y, d.x, d.y) < 40) { d.wag = 0; SFX.whine(); floatText(d.x, d.y - 26, 'heart', ''); burst(d.x, d.y - 14, UIC().health, 4); return; }
+    // nothing to do: pet the dog or the cat if one is beside you
+    const d = g.dog, c = g.cat;
+    const dd = d && d.state === 'friend' ? dist(p.x, p.y, d.x, d.y) : 1e9, dc = c && c.state === 'rest' ? dist(p.x, p.y, c.x, c.y) : 1e9;
+    if (dd < 40 && dd <= dc) { d.wag = 0; SFX.whine(); floatText(d.x, d.y - 26, 'heart', ''); burst(d.x, d.y - 14, '#e5484d', 4); return; }
+    if (dc < 40) { c.pet = 1.2; SFX.purr(); floatText(c.x, c.y - 26, 'heartY', ''); burst(c.x, c.y - 14, '#ffc93a', 6); return; }
     SFX.deny(); return;
   }
+  if (a.type === 'jar') { p.jar = 0; g.sun = JAR.open; g.stats.jars++; SFX.jar(); SFX.chime(1); burst(p.x, p.y - 20, '#ffd24a', 24); return; }
+  if (a.type === 'douse') { p.bucket--; a.plot.burn = 0; a.plot.safe = g.year; if (a.plot.state === 'sprout') a.plot.thirst = 1; SFX.water(); SFX.out(); burst(a.plot.x, a.plot.y - 14, PAL[1].water2, 16); g.stats.doused++; return; }
+  if (a.type === 'feedbunny') { p.fruit--; const b = g.bunny; b.state = 'fed'; b.wt = 1.6; g.bunnyFriend = true; g.stats.fed++; SFX.eat(); SFX.squeak(); burst(b.x, b.y - 10, UIC().health, 10); floatText(b.x, b.y - 30, 'heart', ''); return; }
   if (a.type === 'adopt') { g.dog.state = 'friend'; g.dog.sit = false; g.stats.dog = 1; SFX.bark(); SFX.select(); burst(g.dog.x, g.dog.y - 14, UIC().health, 14); floatText(g.dog.x, g.dog.y - 30, 'heart', '+'); return; }
   if (a.type === 'build') {
     p.wood--; g.kennel.wood++; SFX.build(); burst(KENNEL.x, KENNEL.y - 10, '#c9a27a', 8);
@@ -871,8 +1057,8 @@ function doAction() {
     return;
   }
   if (a.type === 'feed') { p.wood--; g.fuel = Math.min(100, g.fuel + 22); SFX.fire(); burst(HEARTH.x, HEARTH.y - 8, '#ffb347', 14); floatText(HEARTH.x, HEARTH.y - 30, 'fire', '+'); }
-  else if (a.type === 'water') { p.bucket--; a.plot.thirst = 1; SFX.water(); burst(a.plot.x, a.plot.y - 6, PAL[1].water2, 12); }
-  else if (a.type === 'plant') { p.seeds--; a.plot.state = 'sprout'; a.plot.growth = 0; a.plot.thirst = 1; a.plot.nibble = 0; g.stats.planted++; SFX.plant(); burst(a.plot.x, a.plot.y, '#7a5235', 10); }
+  else if (a.type === 'water') { p.bucket--; a.plot.thirst = 1; if (a.plot.state === 'tree') { a.plot.safe = g.year; floatText(a.plot.x, a.plot.y - 60, 'drop', '✓'); } SFX.water(); burst(a.plot.x, a.plot.y - 6, PAL[1].water2, 12); }
+  else if (a.type === 'plant') { p.seeds--; a.plot.state = 'sprout'; a.plot.planted = g.year; a.plot.wild = false; a.plot.growth = 0; a.plot.thirst = 1; a.plot.nibble = 0; g.stats.planted++; SFX.plant(); burst(a.plot.x, a.plot.y, '#7a5235', 10); }
   else if (a.type === 'noplant') { SFX.deny(); floatText(a.plot.x, a.plot.y - 18, ['sprout', 'sun', 'leaf', 'snow'][g.season], '✕'); }
   else if (a.type === 'fill') { p.bucket = 3; SFX.fill(); burst(p.x, p.y, PAL[1].water2, 14); }
   else if (a.type === 'chop') {
@@ -883,7 +1069,7 @@ function doAction() {
     if (pl.state === 'dead') { pl.state = 'empty'; pl.hits = 0; g.items.push(makeItem('wood', pl.x + 10, pl.y + 6, 10)); }
     else if (pl.hits >= 3) {
       const n = pl.age >= 1 ? 3 : 2;
-      pl.state = 'stump'; pl.hits = 0; SFX.fell(); burst(pl.x, pl.y - 40, PAL[g.season].leaf, 26);
+      fell(pl); SFX.fell(); burst(pl.x, pl.y - 40, PAL[g.season].leaf, 26);
       for (let i = 0; i < n; i++) { const it = makeItem('wood', pl.x + rand(-26, 26), pl.y + rand(8, 26), 26); it.vz = 80; g.items.push(it); }
     }
   }
@@ -909,6 +1095,7 @@ function updateParts(dt) {
     if (s === 0) { q.x += -60 * dt; q.y += 520 * q.s * dt; }
     else if (s === 1) { q.y -= 14 * q.s * dt; q.x += Math.sin(time + q.r) * 8 * dt; }
     else if (s === 2) { q.x += (g.wind.x * 220 + 20) * q.s * dt; q.y += (g.wind.y * 220 + 40) * q.s * dt; q.r += dt * 3; }
+    else if (evActive('blizzard')) { q.x -= 320 * q.s * dt; q.y += 150 * q.s * dt; }
     else { q.x += (Math.sin(time * 0.7 + q.r) * 30 - 20) * dt; q.y += 60 * q.s * dt; }
     if (q.y > H + 10) { q.y = -10; q.x = rand(0, W + 80); } if (q.y < -10) q.y = H + 10;
     if (q.x < -20) q.x = W + 10; if (q.x > W + 20) q.x = -10;
@@ -953,10 +1140,19 @@ function drawWorld() {
       if (wFall > 0.01) { ctx.globalAlpha = wFall; ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.r); ellipse(0, 0, 5, 2.6, t.k < 0.72 ? PAL[2].leaf : PAL[2].accent); ctx.restore(); ctx.globalAlpha = 1; }
     } else if (wWinter > 0.01) { ctx.globalAlpha = wWinter * 0.9; ellipse(t.x, t.y, 9, 3.5, '#ffffff'); ctx.globalAlpha = 1; }
   }
+  // the open sun jar melts the snow around you
+  if (g.sun > 0 && g.season === 3 && !g.demo) {
+    const p = g.player, k = Math.min(1, g.sun / 1.2, (JAR.open - g.sun) / 0.6 + 0.1);
+    ctx.globalAlpha = 0.85 * k; ellipse(p.x, p.y + 2, JAR.r * 0.8, JAR.r * 0.42, PAL[1].ground);
+    ctx.strokeStyle = PAL[1].leaf; ctx.lineWidth = 2;
+    for (let i = 0; i < 9; i++) { const a = i * 0.7, x = p.x + Math.cos(a) * JAR.r * 0.5, y = p.y + 2 + Math.sin(a) * JAR.r * 0.24; ctx.beginPath(); ctx.moveTo(x - 4, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + 4, y - 6); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+  }
   drawPond();
   // soil plots
   g.plots.forEach(pl => {
     if (pl.elder) return;
+    if (g.pond > 1.05 && inPond(pl.x, pl.y)) return;
     ellipse(pl.x, pl.y + 2, 19, 9, rgbaStr(P.dirt, pl.state === 'empty' ? 0.85 : 0.6));
     if (pl.state === 'empty') { ctx.strokeStyle = rgbaStr(P.trunk, 0.35); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(pl.x - 10, pl.y); ctx.lineTo(pl.x + 10, pl.y); ctx.moveTo(pl.x - 7, pl.y + 5); ctx.lineTo(pl.x + 7, pl.y + 5); ctx.stroke(); }
   });
@@ -979,6 +1175,11 @@ function drawWorld() {
   g.rabbits.forEach(r => list.push({ y: r.y, f: () => drawRabbit(r) }));
   g.wolves.forEach(w => list.push({ y: w.y, f: () => drawWolf(w) }));
   if (g.dog) list.push({ y: g.dog.y, f: () => drawDog(g.dog) });
+  if (g.cat) list.push({ y: g.cat.y, f: () => drawCat(g.cat) });
+  if (g.bunny) list.push({ y: g.bunny.y, f: () => drawBunny(g.bunny) });
+  if (g.crow) list.push({ y: g.crow.y + 1, f: () => drawCrow(g.crow) });
+  g.plots.forEach(pl => { if (pl.burn) list.push({ y: pl.y + 3, f: () => drawFlames(pl) }); });
+  if (g.season === 1 && !g.demo) g.plots.forEach(pl => { if (pl.safe === g.year && (pl.state === 'tree' || pl.state === 'sprout')) list.push({ y: pl.y + 4, f: () => drawIcon('drop', pl.x + 13, pl.y - 2, 10) }); });
   if (g.kennel.built || (g.dog && g.dog.state === 'friend')) list.push({ y: KENNEL.y, f: drawKennel });
   if (!g.demo) list.push({ y: g.player.y, f: drawPlayer });
   list.sort((a, b) => a.y - b.y).forEach(o => o.f());
@@ -988,6 +1189,7 @@ function drawWorld() {
   drawBorder();
   drawWeather();
   drawLighting();
+  drawGhosts();
 }
 function rgbaStr(c, a) { if (c[0] === '#') return rgba(c, a); return c.replace('rgb(', 'rgba(').replace(')', ',' + a + ')'); }
 
@@ -1060,7 +1262,9 @@ function drawPlant(pl) {
   } else if (pl.state === 'dead') {
     ctx.strokeStyle = '#8a6d3b'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 2, y - 12); ctx.lineTo(x + 8, y - 16); ctx.moveTo(x + 2, y - 10); ctx.lineTo(x - 5, y - 15); ctx.stroke();
   } else if (pl.state === 'stump') {
-    ellipse(x, y + 1, 10, 5, '#6b4a2e'); ellipse(x, y - 3, 9, 4.5, '#c9a27a'); ctx.strokeStyle = '#8a6440'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y - 3, 5, 2.4, 0, 0, 6.28); ctx.stroke();
+    // one ring for every year the tree lived
+    ellipse(x, y + 1, 12, 6, '#6b4a2e'); ellipse(x, y - 3, 11, 5.5, '#c9a27a'); ctx.strokeStyle = '#8a6440'; ctx.lineWidth = 1;
+    const n = clamp(pl.rings || 1, 1, 6); for (let i = 1; i <= n; i++) { ctx.beginPath(); ctx.ellipse(x, y - 3, 10 * i / (n + 0.6), 5 * i / (n + 0.6), 0, 0, 6.28); ctx.stroke(); }
   } else if (pl.state === 'tree') {
     const sz = pl.elder ? 1.45 : 0.72 + 0.28 * Math.min(1, pl.age / 2 + 0.3) * (s === 2 && pl.age === 0 ? 1 : 1);
     ellipse(x, y + 2, 16 * sz, 6 * sz, 'rgba(0,0,0,0.18)');
@@ -1085,6 +1289,8 @@ function drawPlant(pl) {
       ellipse(x - 8 * sz, y - 50 * sz, 9 * sz, 3 * sz, '#ffffff'); ellipse(x + 9 * sz, y - 46 * sz, 7 * sz, 2.5 * sz, '#ffffff');
       ctx.globalAlpha = 1;
     }
+    // the year it was planted, carved in the bark, shows when you stand close
+    if (!pl.wild && pl.planted && !g.demo && dist(g.player.x, g.player.y, pl.x, pl.y) < 70) { ctx.fillStyle = 'rgba(255,240,220,0.9)'; ctx.font = 'bold 9px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Y' + pl.planted, x, y - 12 * sz); }
     if (pl.hits > 0) { for (let i = 0; i < 3; i++) circle(x - 8 + i * 8, y - 72 * sz, 2.5, i < pl.hits ? UIC().danger : 'rgba(255,255,255,0.6)'); }
   }
 }
@@ -1132,8 +1338,9 @@ function drawWolf(w) {
   ctx.fillStyle = '#4b5059'; ctx.beginPath(); ctx.moveTo(x + f * 11, y - 19); ctx.lineTo(x + f * 13, y - 28); ctx.lineTo(x + f * 17, y - 20); ctx.fill();
 }
 function drawDog(d) {
+  if (d.rest) { drawDogResting(d); return; }
   const x = d.x, y = d.y, f = d.face, st = d.sit ? 0 : Math.sin(d.walk) * 2.5;
-  const shiver = g.season === 3 && !g.kennel.built && d.state === 'friend' && !settings.reduceMotion ? Math.sin(time * 50) * 0.8 : 0;
+  const shiver = g.season === 3 && !g.kennel.built && d.state === 'friend' && !settings.reduceMotion ? Math.sin(time * 50) * 1.4 : 0;
   const fur = '#c98b4f', dark = '#8a5a32';
   ellipse(x, y + 2, 13, 4, 'rgba(0,0,0,0.2)');
   ctx.save(); ctx.translate(x + shiver, y);
@@ -1159,6 +1366,25 @@ function drawDog(d) {
   if (g.season === 1 && d.sit) { ctx.fillStyle = '#e86a7a'; ctx.fillRect(f * 15, (d.sit ? -15 : -11), 2.5, 4 + Math.abs(Math.sin(time * 9)) * 2); }
   ctx.restore();
 }
+function drawDogResting(d) {
+  // lying down in front of its house, chin on its paws, eyes shut
+  const x = d.x, y = d.y, f = d.face, fur = '#c98b4f', dark = '#8a5a32';
+  ellipse(x, y + 2, 15, 4, 'rgba(0,0,0,0.2)');
+  ctx.save(); ctx.translate(x, y);
+  const wag = settings.reduceMotion ? 0 : Math.sin(time * 2.5) * 0.5;
+  ctx.strokeStyle = fur; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-f * 11, -3); ctx.quadraticCurveTo(-f * 17, -2, -f * (18 + wag * 3), -6 + wag * 4); ctx.stroke();
+  const br = settings.reduceMotion ? 0 : Math.sin(time * 2) * 0.6;
+  ellipse(0, -5, 12, 5.5 + br, fur);
+  ellipse(f * 13, -1, 5, 2, dark); ellipse(f * 9, -1, 4, 2, dark);
+  circle(f * 12, -6, 6, fur); ellipse(f * 17, -4.5, 3.4, 2.4, '#e8c49a'); circle(f * 19.5, -5, 1.3, '#2a1a12');
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(f * 9, -6, 2.4, 5, f * 1.2, 0, 6.28); ctx.fill();
+  ctx.strokeStyle = '#2a1a12'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(f * 12, -7.5); ctx.lineTo(f * 15, -7); ctx.stroke();
+  ctx.strokeStyle = '#d94b3d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(f * 7, -9); ctx.lineTo(f * 8, -2); ctx.stroke();
+  if (g.season === 3) { ctx.fillStyle = '#d94b3d'; ctx.fillRect(-f * 5 - 5, -10, 10, 4); }
+  ctx.restore();
+  if (!settings.reduceMotion && Math.sin(time * 0.8) > 0.4) { ctx.fillStyle = 'rgba(60,50,40,' + (Math.sin(time * 0.8) - 0.4) + ')'; ctx.font = 'bold 11px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('z', x + f * 16, y - 20 - (time * 6) % 8); }
+}
 function drawKennel() {
   const x = KENNEL.x, y = KENNEL.y, k = g.kennel;
   if (!k.built) {
@@ -1175,7 +1401,93 @@ function drawKennel() {
   ctx.fillStyle = '#a8483a'; ctx.beginPath(); ctx.moveTo(x - 23, y - 20); ctx.lineTo(x, y - 38); ctx.lineTo(x + 23, y - 20); ctx.closePath(); ctx.fill();
   if (seasonWeight(3) > 0.01) { ctx.globalAlpha = seasonWeight(3); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(x - 14, y - 26); ctx.lineTo(x, y - 38); ctx.lineTo(x + 14, y - 26); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1; }
   ctx.fillStyle = '#f2a53a'; rr(x - 9, y - 31, 18, 6, 2); ctx.fill();
-  if (g.dog && g.dog.state === 'friend' && dist(g.dog.x, g.dog.y, x, y) < 30) circle(x, y - 6, 3, '#c98b4f');
+  if (g.dog && g.dog.state === 'friend' && !g.dog.rest && dist(g.dog.x, g.dog.y, x, y) < 30) circle(x, y - 6, 3, '#c98b4f');
+}
+function drawFlames(pl) {
+  if (!pl.burn) return;
+  const h = pl.state === 'tree' ? 64 : 30, k = clamp(pl.burn / 2, 0.4, 1);
+  for (let i = 0; i < 3; i++) {
+    const fx = pl.x + (i - 1) * (pl.state === 'tree' ? 14 : 7), fl = settings.reduceMotion ? 1 : 0.8 + 0.25 * Math.sin(time * 16 + i * 2);
+    ctx.fillStyle = '#ff7a2a'; ctx.beginPath(); ctx.moveTo(fx - 7, pl.y - 2); ctx.quadraticCurveTo(fx - 6, pl.y - h * 0.5 * k * fl, fx, pl.y - h * k * fl); ctx.quadraticCurveTo(fx + 6, pl.y - h * 0.5 * k * fl, fx + 7, pl.y - 2); ctx.fill();
+    ctx.fillStyle = '#ffd24a'; ctx.beginPath(); ctx.moveTo(fx - 3.5, pl.y - 2); ctx.quadraticCurveTo(fx, pl.y - h * 0.35 * k, fx, pl.y - h * 0.55 * k * fl); ctx.quadraticCurveTo(fx, pl.y - h * 0.35 * k, fx + 3.5, pl.y - 2); ctx.fill();
+  }
+  for (let i = 0; i < 3; i++) { const ph = (time * 0.6 + i / 3) % 1; circle(pl.x + Math.sin(ph * 5 + i) * 6, pl.y - h - ph * 40, 4 + ph * 8, 'rgba(70,70,70,' + 0.4 * (1 - ph) + ')'); }
+}
+function drawGhosts() {
+  g.ghosts.forEach(gh => {
+    const a = gh.t < 0.25 ? gh.t / 0.25 : clamp(1 - (gh.t - 0.6) / 1.6, 0, 1), sz = gh.sz, x = gh.x, y = gh.y, cy = y - 44 * sz;
+    ctx.save(); ctx.globalAlpha = 0.55 * a;
+    ellipse(x + 6, y + 8, gh.shade, gh.shade * 0.72, '#1f3a1a');
+    ctx.fillStyle = PAL[1].trunk; rr(x - 5 * sz, y - 30 * sz, 10 * sz, 32 * sz, 3); ctx.fill();
+    circle(x - 14 * sz, cy + 6 * sz, 17 * sz, PAL[1].leaf2); circle(x + 14 * sz, cy + 6 * sz, 17 * sz, PAL[1].leaf2); circle(x, cy - 6 * sz, 21 * sz, PAL[1].leaf);
+    ctx.globalAlpha = a; ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, cy - 2 * sz, 30 * sz, 0, 6.28); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#fffdf6'; ctx.strokeStyle = 'rgba(30,20,10,0.7)'; ctx.lineWidth = 3; ctx.font = 'bold 13px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const label = (gh.tag ? gh.tag + '  ' : '') + gh.rings + (gh.rings === 1 ? ' ring' : ' rings');
+    ctx.strokeText(label, x, cy - 38 * sz); ctx.fillText(label, x, cy - 38 * sz);
+    ctx.restore();
+  });
+}
+function drawCat(c) {
+  const f = c.face, fur = '#f6f3ee', shade = '#d9d3cb', line = 'rgba(120,110,100,0.55)';
+  if (c.state === 'arrive') {
+    // trotting in on the ground
+    const x = c.x, y = c.y, st = Math.sin(c.walk) * 2;
+    ellipse(x, y + 2, 11, 3.5, 'rgba(0,0,0,0.2)');
+    ctx.save(); ctx.translate(x, y); ctx.strokeStyle = shade; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-5, -4); ctx.lineTo(-5 + st, 0); ctx.moveTo(5, -4); ctx.lineTo(5 - st, 0); ctx.stroke();
+    ctx.strokeStyle = fur; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-f * 8, -6); ctx.quadraticCurveTo(-f * 14, -8, -f * 13, -16); ctx.stroke();
+    ellipse(0, -6, 9, 4.5, fur); catHead(f * 9, -10, f, true); ctx.restore(); return;
+  }
+  // hopping up onto the beam, then lying stretched out along it
+  const h = c.state === 'hop' ? c.hop : 1, x = c.x, y = lerp(CAT_SPOT.y, CAT_SPOT.perch, h) - Math.sin(h * Math.PI) * 14;
+  ctx.save(); ctx.translate(x, y); ctx.lineCap = 'round';
+  // tail hangs over the front of the beam and swings lazily (faster when petted)
+  const sw = settings.reduceMotion ? 0.2 : Math.sin(time * (c.pet > 0 ? 7 : 1.8)) * (c.pet > 0 ? 1 : 0.7);
+  ctx.strokeStyle = line; ctx.lineWidth = 4.6; ctx.beginPath(); ctx.moveTo(-f * 11, -2); ctx.quadraticCurveTo(-f * 15, 6, -f * (13 + sw * 6), 13); ctx.stroke();
+  ctx.strokeStyle = fur; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-f * 11, -2); ctx.quadraticCurveTo(-f * 15, 6, -f * (13 + sw * 6), 13); ctx.stroke();
+  // long, low body with front paws stretched out
+  ctx.fillStyle = fur; ctx.strokeStyle = line; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.ellipse(-f * 1, -5, 13, 5.5, 0, 0, 6.2832); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(f * 12, -1.5, 4.5, 2, 0, 0, 6.2832); ctx.fill(); ctx.stroke();
+  ellipse(-f * 3, -3, 7, 2.2, shade);
+  catHead(f * 10, -9, f, c.open);
+  if (g.season === 3) { ctx.fillStyle = '#d94b3d'; ctx.fillRect(f * 10 - 4, -4.5, 8, 2.5); }
+  ctx.restore();
+  if (c.state === 'rest' && !c.open && !settings.reduceMotion && c.pet <= 0 && Math.sin(time * 0.9) > 0.6) { ctx.fillStyle = 'rgba(60,50,40,' + (Math.sin(time * 0.9) - 0.6) * 1.5 + ')'; ctx.font = 'bold 10px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('z', x + f * 16, y - 22 - (time * 6) % 8); }
+}
+function catHead(hx, hy, f, open) {
+  const fur = '#f6f3ee', line = 'rgba(120,110,100,0.55)';
+  ctx.fillStyle = fur; ctx.strokeStyle = line; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(hx - 5, hy - 2); ctx.lineTo(hx - 4, hy - 9); ctx.lineTo(hx - 0.5, hy - 4.5); ctx.lineTo(hx + 0.5, hy - 4.5); ctx.lineTo(hx + 4, hy - 9); ctx.lineTo(hx + 5, hy - 2); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(hx, hy, 5.5, 0, 6.2832); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f2a7b0'; ctx.beginPath(); ctx.moveTo(hx - 3.2, hy - 4.6); ctx.lineTo(hx - 3.1, hy - 7.4); ctx.lineTo(hx - 1.6, hy - 5.2); ctx.moveTo(hx + 3.2, hy - 4.6); ctx.lineTo(hx + 3.1, hy - 7.4); ctx.lineTo(hx + 1.6, hy - 5.2); ctx.fill();
+  if (open) { // yellow eyes with slit pupils
+    ellipse(hx - 2.1, hy - 0.6, 1.5, 1.3, '#f2c230'); ellipse(hx + 2.1, hy - 0.6, 1.5, 1.3, '#f2c230');
+    ctx.fillStyle = '#2a1a12'; ctx.fillRect(hx - 2.4, hy - 1.8, 0.7, 2.4); ctx.fillRect(hx + 1.8, hy - 1.8, 0.7, 2.4);
+  } else { ctx.strokeStyle = '#6a5a50'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(hx - 2.1, hy - 1, 1.4, 0.3, 2.85); ctx.stroke(); ctx.beginPath(); ctx.arc(hx + 2.1, hy - 1, 1.4, 0.3, 2.85); ctx.stroke(); }
+  circle(hx, hy + 1.6, 0.9, '#e58a96');
+}
+function drawBunny(b) {
+  const hop = b.state === 'fed' ? 0 : Math.max(0, Math.sin(b.hop)) * 5, x = b.x, y = b.y - hop, f = b.face;
+  const fur = b.state === 'guard' ? '#f4efe6' : '#b8a48c';
+  ellipse(b.x, b.y + 2, 8, 3, 'rgba(0,0,0,0.18)');
+  ellipse(x, y - 6, 9, 6.5, fur); circle(x + f * 7, y - 10, 5, fur);
+  ellipse(x + f * 6, y - 18, 2, 6, fur); ellipse(x + f * 9, y - 18, 2, 6, fur);
+  circle(x - f * 9, y - 7, 3, '#ffffff'); circle(x + f * 9, y - 11, 1.2, '#222');
+  if (b.state === 'guard') { ctx.fillStyle = '#d94b3d'; rr(x + f * 2 - 4, y - 8, 8, 3, 1.5); ctx.fill(); }
+}
+function drawCrow(c) {
+  const x = c.x, y = c.y, f = c.face, z = c.z || 0, flap = c.z > 2 ? Math.sin(c.flap) : 0;
+  ellipse(x, y + 2, 9, 3, 'rgba(0,0,0,' + (0.25 - Math.min(0.18, z / 400)) + ')');
+  ctx.save(); ctx.translate(x, y - z);
+  ellipse(0, -7, 10, 6, '#23262c'); circle(f * 9, -11, 5, '#23262c');
+  ctx.fillStyle = '#e8b33d'; ctx.beginPath(); ctx.moveTo(f * 13, -12); ctx.lineTo(f * 19, -10.5); ctx.lineTo(f * 13, -9); ctx.fill();
+  circle(f * 10.5, -12, 1.2, '#f5f5f5');
+  ctx.fillStyle = '#23262c'; ctx.beginPath(); ctx.moveTo(-f * 8, -7); ctx.lineTo(-f * 17, -4); ctx.lineTo(-f * 8, -4); ctx.fill();
+  ctx.fillStyle = '#353a42'; ctx.beginPath(); ctx.moveTo(-3, -9); ctx.lineTo(-f * 6, -9 - 14 * flap - 2); ctx.lineTo(f * 4, -8); ctx.fill();
+  if (c.carry) drawIcon('seed', f * 18, -7, 9);
+  ctx.restore();
+  if (c.state === 'peck') { ctx.strokeStyle = '#fdf6e3'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y - 10, 16, -1.57, -1.57 + 6.28 * c.peck / 2.6); ctx.stroke(); }
 }
 function drawWolfEyes() {
   g.wolves.forEach(w => { const f = w.face; circle(w.x + f * 18, w.y - 17, 1.8, '#ffe14a'); circle(w.x + f * 14, w.y - 17, 1.8, '#ffe14a'); });
@@ -1201,7 +1513,7 @@ function drawWeather() {
 }
 function darkness() {
   const s = g.season, t = g.t, L = g.len;
-  if (s === 3) return 0.84;
+  if (s === 3) return evActive('blizzard') ? 0.93 : 0.84;
   if (s === 0) return g.demo ? 0 : 0.84 * clamp(1 - t / 3, 0, 1);
   if (s === 2) return g.demo ? 0 : 0.4 * clamp((t - (L - 9)) / 9, 0, 1);
   return 0;
@@ -1215,13 +1527,14 @@ function drawLighting() {
     const hole = (x, y, R, a) => { const r = R; const gr = fctx.createRadialGradient(x / 2, y / 2, 0, x / 2, y / 2, r / 2); gr.addColorStop(0, 'rgba(0,0,0,' + a + ')'); gr.addColorStop(0.6, 'rgba(0,0,0,' + a * 0.7 + ')'); gr.addColorStop(1, 'rgba(0,0,0,0)'); fctx.fillStyle = gr; fctx.fillRect(x / 2 - r / 2, y / 2 - r / 2, r, r); };
     const fl = settings.reduceMotion ? 1 : 0.96 + 0.04 * Math.sin(time * 13);
     if (g.fuel > 0) hole(HEARTH.x, HEARTH.y, lightRadius() * fl, 1);
-    if (!g.demo) hole(g.player.x, g.player.y - 10, 115, 0.95);
+    if (!g.demo) hole(g.player.x, g.player.y - 10, g.sun > 0 ? JAR.r * 2.4 : evActive('blizzard') ? 74 : 115, g.sun > 0 ? 1 : 0.95);
     hole(480, 235, 46, 0.6);
     g.items.forEach(it => { if (it.type === 'wood') hole(it.x, it.y, 30 + Math.sin(time * 3 + it.glint) * 5, 0.8); });
     ctx.drawImage(fog, 0, 0, W, H);
     if (g.fuel > 0) { ctx.globalCompositeOperation = 'lighter'; const gr = ctx.createRadialGradient(HEARTH.x, HEARTH.y, 0, HEARTH.x, HEARTH.y, lightRadius()); gr.addColorStop(0, 'rgba(255,140,40,' + 0.25 * dk + ')'); gr.addColorStop(1, 'rgba(255,140,40,0)'); ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over'; }
     if (g.season === 3) drawWolfEyes();
   }
+  if (g.sun > 0 && !g.demo) drawSunJar();
   // summer glare
   const wS = seasonWeight(1);
   if (wS > 0.01) {
@@ -1233,6 +1546,16 @@ function drawLighting() {
   if (g.season === 0 && !g.demo) { ctx.fillStyle = 'rgba(60,80,110,0.08)'; ctx.fillRect(0, 0, W, H); }
 }
 
+function drawSunJar() {
+  // a moving circle of summer: gold light, grass where the snow has melted
+  const p = g.player, k = Math.min(1, g.sun / 1.2, (JAR.open - g.sun) / 0.4 + 0.2), r = JAR.r * (settings.reduceMotion ? 1 : 0.97 + 0.03 * Math.sin(time * 6));
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const gr = ctx.createRadialGradient(p.x, p.y - 8, 0, p.x, p.y - 8, r);
+  gr.addColorStop(0, 'rgba(255,200,80,' + 0.32 * k + ')'); gr.addColorStop(0.75, 'rgba(255,180,60,' + 0.16 * k + ')'); gr.addColorStop(1, 'rgba(255,180,60,0)');
+  ctx.fillStyle = gr; ctx.fillRect(p.x - r, p.y - 8 - r, r * 2, r * 2); ctx.restore();
+  ctx.strokeStyle = 'rgba(255,214,90,' + 0.7 * k + ')'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.lineDashOffset = -time * 20;
+  ctx.beginPath(); ctx.arc(p.x, p.y - 8, r, -1.5708, -1.5708 + 6.2832 * g.sun / JAR.open); ctx.stroke(); ctx.setLineDash([]);
+}
 // ---------------------------------------------------------------- icons
 function drawIcon(type, x, y, s, opt) {
   opt = opt || {};
@@ -1245,10 +1568,17 @@ function drawIcon(type, x, y, s, opt) {
       if (settings.colorblind) { ctx.strokeStyle = '#2a1a12'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(0, 1, 7, 0, 6.28); ctx.stroke(); } break; }
     case 'wood': ctx.rotate(-0.35); ctx.fillStyle = '#7a5235'; rr(-9, -3.5, 18, 7, 3); ctx.fill(); ellipse(8, 0, 2.5, 3.5, '#c9a27a'); ctx.strokeStyle = '#5e3d27'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-5, -1); ctx.lineTo(3, -1); ctx.stroke(); break;
     case 'drop': ctx.fillStyle = opt.warn && Math.sin(time * 10) > 0 ? UIC().danger : '#3fa9e0'; ctx.beginPath(); ctx.moveTo(0, -9); ctx.quadraticCurveTo(8, 2, 0, 8); ctx.quadraticCurveTo(-8, 2, 0, -9); ctx.fill(); circle(-2, 1, 1.8, 'rgba(255,255,255,0.7)'); break;
+    case 'jar': { const f = opt.fill === undefined ? 1 : opt.fill;
+      if (f >= 1) circle(0, 1, 11, 'rgba(255,214,90,' + (0.3 + 0.15 * Math.sin(time * 5)) + ')');
+      ctx.fillStyle = 'rgba(220,240,255,0.35)'; rr(-6, -6, 12, 14, 4); ctx.fill();
+      if (f > 0) { ctx.fillStyle = '#ffc93a'; const h = 12 * f; rr(-5, 7 - h, 10, h, 3); ctx.fill(); }
+      ctx.strokeStyle = '#eef6ff'; ctx.lineWidth = 1.4; rr(-6, -6, 12, 14, 4); ctx.stroke();
+      ctx.fillStyle = '#a8483a'; ctx.fillRect(-5, -9, 10, 3); break; }
     case 'bucket': ctx.fillStyle = '#9aa3ad'; ctx.beginPath(); ctx.moveTo(-7, -4); ctx.lineTo(7, -4); ctx.lineTo(5, 8); ctx.lineTo(-5, 8); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#3fa9e0'; ctx.fillRect(-6, -3, 12, 3); ctx.strokeStyle = '#6b737c'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, -4, 7, 3.14, 6.28); ctx.stroke(); break;
     case 'sun': circle(0, 0, 5.5, '#ffc93a'); ctx.strokeStyle = '#ffb21f'; ctx.lineWidth = 2; for (let i = 0; i < 8; i++) { const a = i * 0.785; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 7.5, Math.sin(a) * 7.5); ctx.lineTo(Math.cos(a) * 10.5, Math.sin(a) * 10.5); ctx.stroke(); } break;
     case 'shade': ellipse(0, 6, 9, 3, 'rgba(0,0,0,0.35)'); ctx.fillStyle = '#7a5235'; ctx.fillRect(-1.5, -1, 3, 7); circle(0, -4, 7, '#3f9c4a'); break;
     case 'fire': ctx.fillStyle = '#ff7a2a'; ctx.beginPath(); ctx.moveTo(-7, 7); ctx.quadraticCurveTo(-7, -3, 0, -10); ctx.quadraticCurveTo(7, -3, 7, 7); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#ffd24a'; ctx.beginPath(); ctx.moveTo(-3.5, 7); ctx.quadraticCurveTo(-3, 0, 0, -3); ctx.quadraticCurveTo(3, 0, 3.5, 7); ctx.closePath(); ctx.fill(); break;
+    case 'heartY': ctx.fillStyle = '#ffc93a'; ctx.beginPath(); ctx.moveTo(0, 8); ctx.bezierCurveTo(-12, -1, -6, -10, 0, -4); ctx.bezierCurveTo(6, -10, 12, -1, 0, 8); ctx.fill(); ctx.strokeStyle = '#c98a10'; ctx.lineWidth = 1.2; ctx.stroke(); break;
     case 'heart': ctx.fillStyle = UIC().health; ctx.beginPath(); ctx.moveTo(0, 8); ctx.bezierCurveTo(-12, -1, -6, -10, 0, -4); ctx.bezierCurveTo(6, -10, 12, -1, 0, 8); ctx.fill(); break;
     case 'axe': ctx.rotate(0.5); ctx.fillStyle = '#8a5a2b'; ctx.fillRect(-1.5, -9, 3, 18); ctx.fillStyle = '#b8c0c8'; ctx.beginPath(); ctx.moveTo(1, -9); ctx.quadraticCurveTo(10, -6, 9, 1); ctx.lineTo(1, -2); ctx.closePath(); ctx.fill(); break;
     case 'rabbit': ellipse(0, 3, 7, 5, '#b8a48c'); circle(4, -1, 4, '#b8a48c'); ellipse(3, -8, 1.6, 4.5, '#b8a48c'); ellipse(6, -8, 1.6, 4.5, '#a8947c'); break;
@@ -1262,6 +1592,7 @@ function drawIcon(type, x, y, s, opt) {
     case 'wind': ctx.strokeStyle = '#e9e2d0'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-9, -4); ctx.lineTo(4, -4); ctx.arc(4, -7, 3, 1.57, -1.2, true); ctx.moveTo(-9, 2); ctx.lineTo(7, 2); ctx.arc(7, 5, 3, -1.57, 1.2); ctx.stroke(); break;
     case 'dog': circle(0, 1, 7, '#c98b4f'); ctx.fillStyle = '#8a5a32'; ctx.beginPath(); ctx.ellipse(-6, -1, 2.6, 6, 0.3, 0, 6.28); ctx.fill(); ctx.beginPath(); ctx.ellipse(6, -1, 2.6, 6, -0.3, 0, 6.28); ctx.fill(); ellipse(0, 4, 3.6, 2.6, '#e8c49a'); circle(0, 3, 1.4, '#2a1a12'); circle(-2.6, -1, 1.1, '#2a1a12'); circle(2.6, -1, 1.1, '#2a1a12'); break;
     case 'house': ctx.fillStyle = '#b07a4a'; ctx.fillRect(-7, -2, 14, 10); ctx.fillStyle = '#3a2618'; ctx.beginPath(); ctx.arc(0, 3, 3.5, 3.14, 0); ctx.lineTo(3.5, 8); ctx.lineTo(-3.5, 8); ctx.fill(); ctx.fillStyle = '#a8483a'; ctx.beginPath(); ctx.moveTo(-10, -1); ctx.lineTo(0, -10); ctx.lineTo(10, -1); ctx.closePath(); ctx.fill(); break;
+    case 'wave': ctx.strokeStyle = '#3fa9e0'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; for (let i = 0; i < 2; i++) { ctx.beginPath(); ctx.moveTo(-9, -3 + i * 7); ctx.quadraticCurveTo(-4.5, -8 + i * 7, 0, -3 + i * 7); ctx.quadraticCurveTo(4.5, 2 + i * 7, 9, -3 + i * 7); ctx.stroke(); } break;
     case 'cross': ctx.strokeStyle = UIC().danger; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(6, 6); ctx.moveTo(6, -6); ctx.lineTo(-6, 6); ctx.stroke(); break;
   }
   ctx.restore();
@@ -1320,11 +1651,16 @@ function drawArrowTo(tx, ty) {
 function nearest(list, x, y) { let b = null, bd = 1e9; list.forEach(o => { const d = dist(x, y, o.x, o.y); if (d < bd) { bd = d; b = o; } }); return b; }
 function drawGuidance() {
   const p = g.player, s = g.season, act = bestAction();
+  // the sun jar shows itself filling above your head
+  if (s === 1 && p.jar < 1 && !p.inShade) drawIcon('jar', p.x, p.y - 50, 22, { fill: p.jar });
   const tutorial = settings.hints === 'always' || (settings.hints === 'auto' && g.year === 1);
   const any = settings.hints !== 'off';
   // context prompt over whatever you can interact with
   if (act && any) drawBubble(act.x, act.y, [{ key: primaryLabel('action') }, { icon: act.icon, no: act.no }], act.no ? 0.6 : 1);
   if (!any) return;
+  // a dog with no house shivers by the fire and shows what it needs
+  const dg = g.dog;
+  if (s === 3 && dg && dg.state === 'friend' && !g.kennel.built && dg.sit && !dg.carry && dist(p.x, p.y, dg.x, dg.y) < 160) drawBubble(dg.x, dg.y - 30, [{ icon: 'snow' }, { text: '→' }, { icon: 'house' }], 0.85);
   // critical: hungry with food
   if (p.hp < 40 && p.fruit > 0) drawBubble(p.x, p.y - 44, [{ key: primaryLabel('eat') }, { icon: 'fruit' }]);
   if (!tutorial) { if (s === 3 && g.fuel < 30 && p.wood > 0 && (!act || act.type !== 'feed')) drawArrowTo(HEARTH.x, HEARTH.y); return; }
@@ -1342,18 +1678,23 @@ function drawGuidance() {
     else if (items('seed').length) { const it = nearest(items('seed'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'seed' }]; }
   } else if (s === 1) {
     const thirsty = g.plots.filter(q => q.state === 'sprout' && q.thirst < 0.6);
-    if (g.dog && g.dog.state === 'stray' && p.hp >= 50 && !thirsty.length) { target = { x: g.dog.x, y: g.dog.y - 34 }; parts = [{ icon: 'dog' }, { text: '?' }]; }
+    const burning = nearest(g.plots.filter(q => q.burn > 0), p.x, p.y);
+    if (burning && p.bucket === 0) { const a = Math.atan2(p.y - POND.y, p.x - POND.x); target = { x: POND.x + Math.cos(a) * POND.rx * g.pond * 0.7, y: POND.y + Math.sin(a) * POND.ry * g.pond * 0.7 - 10 }; parts = [{ icon: 'bucket' }, { text: '→' }, { icon: 'fire' }]; }
+    else if (burning) { target = { x: burning.x, y: burning.y - 40 }; parts = [{ icon: 'drop' }, { text: '→' }, { icon: 'fire' }]; }
+    else     if (g.dog && g.dog.state === 'stray' && p.hp >= 50 && !thirsty.length) { target = { x: g.dog.x, y: g.dog.y - 34 }; parts = [{ icon: 'dog' }, { text: '?' }]; }
     else if (!p.inShade && p.hp < 70) { const t = nearestShade(); if (t) { target = t; parts = [{ icon: 'sun' }, { text: '→' }, { icon: 'shade' }]; } }
     else if (thirsty.length && p.bucket === 0) { const a = Math.atan2(p.y - POND.y, p.x - POND.x); target = { x: POND.x + Math.cos(a) * POND.rx * g.pond * 0.7, y: POND.y + Math.sin(a) * POND.ry * g.pond * 0.7 - 10 }; parts = [{ icon: 'bucket' }]; }
     else if (thirsty.length) { const pl = nearest(thirsty, p.x, p.y); target = { x: pl.x, y: pl.y - 40 }; parts = [{ icon: 'bucket' }, { text: '→' }, { icon: 'sprout' }]; }
   } else if (s === 2) {
-    if (items('fruit').length) { const it = nearest(items('fruit'), p.x, p.y); target = { x: it.x, y: it.y - 16 }; parts = [{ icon: 'fruit' }]; }
+    if (g.crow && g.crow.state === 'peck') { target = { x: g.crow.x, y: g.crow.y - 30 }; parts = [{ icon: 'seed' }, { text: '→' }, { icon: 'flower' }, { icon: 'seed' }, { icon: 'seed' }]; }
+    else if (g.bunny && g.bunny.state === 'hungry' && p.fruit > 0) { target = { x: g.bunny.x, y: g.bunny.y - 30 }; parts = [{ icon: 'fruit' }, { text: '→' }, { icon: 'rabbit' }]; }
+    else if (items('fruit').length) { const it = nearest(items('fruit'), p.x, p.y); target = { x: it.x, y: it.y - 16 }; parts = [{ icon: 'fruit' }]; }
     else if (items('seed').length) { const it = nearest(items('seed'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'seed' }]; }
     else if (items('wood').length) { const it = nearest(items('wood'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'wood' }]; }
   } else {
     if (p.wood > 0 && g.fuel < 80) { target = { x: HEARTH.x, y: HEARTH.y - 30 }; parts = [{ icon: 'wood' }, { text: '→' }, { icon: 'fire' }]; }
     else if (g.fuel < 60 && items('wood').length) { const it = nearest(items('wood'), p.x, p.y); target = { x: it.x, y: it.y - 14 }; parts = [{ icon: 'wood' }]; }
-    else if (!p.warm) { target = { x: HEARTH.x, y: HEARTH.y - 30 }; parts = [{ icon: 'snow' }, { text: '→' }, { icon: 'fire' }]; }
+    else if (!p.warm && g.sun <= 0) { target = { x: HEARTH.x, y: HEARTH.y - 30 }; parts = [{ icon: 'snow' }, { text: '→' }, { icon: 'fire' }]; }
   }
   if (!target && s !== 3 && g.dog && g.dog.state === 'friend' && !g.kennel.built && p.wood > 0) { target = { x: KENNEL.x, y: KENNEL.y - 40 }; parts = [{ icon: 'wood' }, { text: '→' }, { icon: 'house' }]; }
   if (target) { if (parts !== 'alert') drawBubble(target.x, target.y, parts, 0.9); drawArrowTo(target.x, target.y); }
@@ -1380,6 +1721,7 @@ function drawHUD() {
     const am = a0 + 0.785; drawIcon(['flower', 'sun', 'leaf', 'snow'][i], cx + Math.cos(am) * R * 0.58, cy + Math.sin(am) * R * 0.58, 13);
   }
   ctx.strokeStyle = 'rgba(16,20,26,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
+  if (g.ev && (g.ev.state === 'pending' || g.ev.state === 'warn')) { const ea = -1.5708 + ((g.season + g.ev.at / g.len) / 4) * 6.2832; circle(cx + Math.cos(ea) * (R - 5), cy + Math.sin(ea) * (R - 5), 5, UIC().danger); circle(cx + Math.cos(ea) * (R - 5), cy + Math.sin(ea) * (R - 5), 2, '#ffffff'); }
   const na = -1.5708 + frac * 6.2832;
   const last = g.len - g.t < 3.5;
   ctx.strokeStyle = last && Math.sin(time * 14) > 0 ? '#ffffff' : '#fdf6e3'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
@@ -1403,6 +1745,7 @@ function drawHUD() {
   inv.forEach(([ic, n]) => { drawIcon(ic, ix + 8, iy, 18); ctx.fillStyle = n >= CAP && ic !== 'seed' ? '#ffd24a' : n ? '#fdf6e3' : 'rgba(253,246,227,0.4)'; ctx.fillText(String(n), ix + 22, iy + 1); ix += 58; });
   drawIcon('bucket', ix + 8, iy, 18);
   for (let i = 0; i < 3; i++) { ctx.globalAlpha = i < p.bucket ? 1 : 0.25; drawIcon('drop', ix + 26 + i * 12, iy, 11); } ctx.globalAlpha = 1;
+  drawIcon('jar', ix + 76, iy, 20, { fill: g.sun > 0 ? g.sun / JAR.open : p.jar });
   // next season preview
   const nx = 920, ny = 34, ns = (g.season + 1) % 4;
   ctx.fillStyle = 'rgba(16,20,26,0.7)'; rr(nx - 96, ny - 20, 110, 40, 12); ctx.fill();
@@ -1411,6 +1754,17 @@ function drawHUD() {
   ctx.fillText('→', nx - 18, ny + 1);
   drawIcon(['flower', 'sun', 'leaf', 'snow'][ns], nx + 2, ny, 18);
   if (touch.used) { ctx.fillStyle = 'rgba(16,20,26,0.6)'; circle(912, 92, 18, 'rgba(16,20,26,0.6)'); ctx.fillStyle = '#fdf6e3'; ctx.fillRect(905, 84, 4, 16); ctx.fillRect(915, 84, 4, 16); }
+  // weather event: warning, then a shrinking bar while it lasts
+  if (g.ev && (g.ev.state === 'warn' || g.ev.state === 'active')) {
+    const ex = 702, ey = 14, on = g.ev.state === 'active' || Math.sin(time * 14) > -0.2;
+    ctx.globalAlpha = on ? 1 : 0.55;
+    ctx.fillStyle = UIC().danger; rr(ex, ey, 112, 40, 12); ctx.fill();
+    circle(ex + 22, ey + 20, 14, g.ev.type === 'gust' || g.ev.type === 'blizzard' ? 'rgba(20,24,32,0.7)' : 'rgba(255,255,255,0.92)'); drawIcon(EVENT_ICON[g.ev.type], ex + 22, ey + 20, 18);
+    ctx.fillStyle = '#ffffff'; ctx.font = '900 18px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!!', ex + 50, ey + 21);
+    if (g.ev.state === 'active') { ctx.fillStyle = 'rgba(255,255,255,0.35)'; rr(ex + 66, ey + 16, 38, 8, 4); ctx.fill(); ctx.fillStyle = '#ffffff'; rr(ex + 66, ey + 16, 38 * (1 - g.ev.t / g.ev.dur), 8, 4); ctx.fill(); }
+    else { ctx.font = 'bold 14px ' + FONT; ctx.fillText(Math.ceil(g.ev.at - g.t) + '', ex + 86, ey + 21); }
+    ctx.globalAlpha = 1;
+  }
   // fall wind indicator
   if (g.season === 2) { ctx.save(); ctx.translate(nx - 40, ny + 40); ctx.rotate(Math.atan2(g.wind.y, g.wind.x)); ctx.globalAlpha = clamp(g.wind.s * 1.5, 0.3, 1); drawIcon('wind', 0, 0, 22); ctx.restore(); ctx.globalAlpha = 1; }
   // season banner

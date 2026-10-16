@@ -6,7 +6,7 @@
 
 | # | Deliverable | Status |
 |---|---|---|
-| 1 | Playable build, demonstrated live and playable by judges | Done: `index.html`, which runs offline in any browser. A hosted copy is also available as a Claude artifact link. |
+| 1 | Playable build, demonstrated live and playable by judges | Done: `index.html`, which runs offline in any browser. Play link: https://raw.githack.com/aryano96/Algoma-Game-Jam/main/index.html (backup: https://claude.ai/artifact/FnPmHve9MJkY951WdRUGky). |
 | 2 | Pitch of up to 5 minutes, then 3 minutes of questions | Script ready in `PITCH.md`. **Your team needs to rehearse it.** |
 | 3 | Link to the code or project repository | Done: https://github.com/aryano96/Algoma-Game-Jam (paste this link into the submission form). |
 | 4 | List of third-party assets, tools and libraries, with credit | Done: see "Third-party assets, tools and libraries" in `README.md` (no third-party assets are used). |
@@ -37,7 +37,7 @@
 - **Gameplay and fun (30):** a 2 to 3 minute year, a tense first winter, and a clear "one more year" pull.
 - **Art and audio (20):** one style, four palettes, generated per-season music.
 - **Playable build (15):** one file that runs offline.
-- **Originality (10):** the tree is shade, then food, then fuel, and the winter choice decides your next year.
+- **Originality (10):** the tree is shade, then food, then fuel, and the winter choice decides your next year. The sun jar lets you bottle summer and spend it in winter.
 
 ## Before judging
 
